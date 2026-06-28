@@ -5,6 +5,7 @@ MQTT 发布者模块
 负责与 MQTT Broker 建立连接，
 将 StatusMessage 以 JSON 格式发布到指定主题。
 支持自动重连和遗嘱消息 (LWT)。
+已适配任务书_2 新字段名（agent/task_summary/timestamp）。
 """
 
 import json
@@ -52,13 +53,13 @@ class MqttPublisher:
             protocol=mqtt.MQTTv311,
         )
 
-        # 配置遗嘱消息 (LWT) —— 离线时通知
+        # 配置遗嘱消息 (LWT) —— 离线时通知（使用新字段名）
         self._client.will_set(
             topic=self.topic,
             payload=json.dumps({
                 "status": "offline",
-                "agent_name": "hermes",
-                "task": "disconnected",
+                "agent": "hermes",
+                "task_summary": "disconnected",
             }),
             qos=1,
             retain=True,

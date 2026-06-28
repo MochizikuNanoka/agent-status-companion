@@ -48,10 +48,10 @@ async def get_status():
         StatusMessage JSON 格式的当前状态
     """
     if _aggregator is None:
-        return StatusMessage(status="idle", agent_name="hermes", task="服务未就绪")
+        return StatusMessage(status="idle", agent="hermes", task_summary="服务未就绪")
     latest = _aggregator.get_latest_status()
     if latest is None:
-        return StatusMessage(status="idle", agent_name="hermes", task="等待首次轮询")
+        return StatusMessage(status="idle", agent="hermes", task_summary="等待首次轮询")
     return latest
 
 

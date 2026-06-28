@@ -28,7 +28,12 @@ class AppConfig:
 
     # Hermes Agent 监控配置
     hermes_log_path: Optional[Path] = field(default_factory=lambda: _default_log_path())
-    hermes_log_file: str = field(default_factory=lambda: os.getenv("HERMES_LOG_FILE", "hermes.log"))
+    hermes_log_file: str = field(default_factory=lambda: os.getenv("HERMES_LOG_FILE", "agent.log"))
+
+    # 模拟模式（用于无 Hermes 环境下的开发测试）
+    simulate: bool = field(
+        default_factory=lambda: os.getenv("SIMULATE", "").lower() in ("1", "true", "yes")
+    )
 
     # 轮询与 Web 配置
     poll_interval: float = field(
@@ -45,14 +50,19 @@ def _default_log_path() -> Path:
     获取默认的 Hermes 日志路径
 
     优先读取 HERMES_LOG_PATH 环境变量，
-    否则使用 Windows 下的默认路径。
+    否则根据操作系统使用默认路径。
     """
     env_path = os.getenv("HERMES_LOG_PATH")
     if env_path:
         return Path(env_path)
 
-    # Windows 默认路径
-    return Path.home() / "AppData" / "Local" / "hermes" / "logs"
+    if os.name == "nt":
+        # Windows: %LOCALAPPDATA%/hermes/logs/
+        local_appdata = os.getenv("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
+        return Path(local_appdata) / "hermes" / "logs"
+    else:
+        # Linux/Mac: ~/.hermes/logs/
+        return Path.home() / ".hermes" / "logs"
 
 
 def load_config(config_path: Optional[str] = None) -> AppConfig:

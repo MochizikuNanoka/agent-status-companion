@@ -5,6 +5,7 @@
 管理多个 Monitor 实例，定时轮询状态变化，
 仅在状态变更时触发 MQTT 发布。
 维护累计运行时间统计。
+适配任务书_2 新字段名（agent/task_summary/timestamp）。
 """
 
 import time
@@ -137,7 +138,7 @@ class StatusAggregator:
         # 保存最新快照
         self._latest_status = current
 
-        # 检测状态变化
+        # 检测状态变化（使用 task_summary 字段）
         changed = self._has_changed(current)
 
         if changed:
@@ -157,7 +158,7 @@ class StatusAggregator:
                 "状态变更: %s | 模型=%s | 任务=%s | CPU=%.1f%% MEM=%.1fMB",
                 current.status.value,
                 current.model or "-",
-                (current.task or "-")[:40],
+                (current.task_summary or "-")[:40],
                 current.cpu_percent,
                 current.mem_mb,
             )
@@ -177,18 +178,11 @@ class StatusAggregator:
                 self._cum_working_seconds += elapsed
                 self._working_start = None
         elif is_working and self._was_working:
-            # 持续工作中：实时累加（让累计时间不断增长）
+            # 持续工作中：实时累加
             if self._working_start is not None:
-                elapsed = now - self._working_start
-                # 更新但不重置起始点
                 self._cum_working_seconds += self._poll_interval
 
         self._was_working = is_working
-
-        # 如果进程没了，重置累计
-        if current.status == AgentStatus.IDLE and current.model is None:
-            # 不自动重置，保留累计
-            pass
 
     def _has_changed(self, current: StatusMessage) -> bool:
         """检测状态是否发生变化"""
@@ -198,7 +192,7 @@ class StatusAggregator:
         return (
             current.status != self._last_published.status
             or current.model != self._last_published.model
-            or current.task != self._last_published.task
+            or current.task_summary != self._last_published.task_summary
             or abs(current.cpu_percent - self._last_published.cpu_percent) > 5.0
             or abs(current.mem_mb - self._last_published.mem_mb) > 10.0
         )

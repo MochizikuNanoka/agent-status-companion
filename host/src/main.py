@@ -5,6 +5,7 @@ CLI 入口模块
 使用 argparse 解析命令行参数，
 启动 MQTT 发布者、状态聚合器和 Web 面板。
 支持优雅退出（SIGINT/SIGTERM）。
+支持 --simulate 模拟模式（任务书_2）。
 """
 
 import sys
@@ -49,6 +50,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
   python -m host.src.main
   python -m host.src.main --broker 10.0.0.5 --web-port 9090
   python -m host.src.main --topic agent/hermes/status --poll-interval 5
+  python -m host.src.main --simulate                    # 模拟模式
+  python -m host.src.main --simulate --log-path D:/logs/hermes/agent.log
         """,
     )
 
@@ -88,7 +91,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--log-path",
         default=None,
-        help="Hermes 日志文件路径",
+        help="Hermes agent.log 文件路径（默认: 自动检测）",
+    )
+    parser.add_argument(
+        "--simulate",
+        action="store_true",
+        default=None,
+        help="启用模拟模式（循环切换 IDLE/WORKING/WAITING，用于开发测试）",
     )
     parser.add_argument(
         "--config",
@@ -145,16 +154,20 @@ class Application:
         # 命令行参数覆盖配置
         self._override_config()
 
-        # 创建组件
+        # 创建 MQTT 发布者
         self._publisher = MqttPublisher(
             broker=self._config.mqtt_broker,
             port=self._config.mqtt_port,
             topic=self._config.mqtt_topic,
         )
+
+        # 创建监控器（支持模拟模式）
         self._monitor = HermesMonitor(
+            simulate=self._config.simulate,
             log_path=self._config.hermes_log_path,
-            log_file=self._config.hermes_log_file,
         )
+
+        # 创建聚合器
         self._aggregator = StatusAggregator(
             monitor=self._monitor,
             publisher=self._publisher,
@@ -182,6 +195,10 @@ class Application:
             config.web_host = args.web_host
         if args.poll_interval is not None:
             config.poll_interval = args.poll_interval
+        if args.log_path is not None:
+            config.hermes_log_path = args.log_path
+        if args.simulate is not None:
+            config.simulate = args.simulate
 
     def _signal_handler(self, signum, frame) -> None:
         """信号处理：优雅退出"""
@@ -198,8 +215,10 @@ class Application:
         logger.info("=" * 50)
         logger.info("MQTT:    %s:%d -> %s", self._config.mqtt_broker, self._config.mqtt_port, self._config.mqtt_topic)
         logger.info("Web:     http://%s:%d", self._config.web_host, self._config.web_port)
-        logger.info("日志:    %s / %s", self._config.hermes_log_path, self._config.hermes_log_file)
+        logger.info("日志:    %s", self._config.hermes_log_path)
         logger.info("轮询:    每 %.1f 秒", self._config.poll_interval)
+        if self._config.simulate:
+            logger.info("模式:    模拟模式（无 Hermes 环境）")
         logger.info("=" * 50)
 
         # 连接 MQTT

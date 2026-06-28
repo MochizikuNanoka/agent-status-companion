@@ -322,7 +322,7 @@
             statusText.textContent = STATUS_LABELS[status] || status;
 
             // 基础信息
-            agentName.textContent = data.agent_name || '-';
+            agentName.textContent = data.agent || data.agent_name || '-';
             modelName.textContent = data.model || '未指定';
             contextLen.textContent = data.context_len != null ? data.context_len : 0;
 
@@ -337,9 +337,10 @@
                 ? Number(data.mem_mb).toFixed(1)
                 : '0.0';
 
-            // 任务文本
-            if (data.task) {
-                taskText.textContent = data.task;
+            // 任务文本（兼容新旧字段名）
+            const taskValue = data.task_summary || data.task;
+            if (taskValue) {
+                taskText.textContent = taskValue;
                 taskText.className = 'task-text';
             } else {
                 taskText.textContent = '无活动任务';
