@@ -20,6 +20,20 @@
  *
  * WiFi 配置: 修改下文 WIFI_SSID / WIFI_PASS 为你的凭据
  * MQTT 配置: 修改下文 MQTT_BROKER / MQTT_PORT 等
+ *
+ * ===================== JSON 消息格式 =====================
+ * MQTT 接收的 JSON 格式 (v2):
+ * {
+ *   "status":       "idle" | "working" | "waiting" | "error",
+ *   "agent":        "hermes",             // Agent 名称 (原 agent_name)
+ *   "model":        "deepseek-v4-flash",  // 模型名
+ *   "task_summary": "正在分析代码...",     // 任务描述 (原 task)
+ *   "context_len":  8192,                 // 上下文长度 (token)
+ *   "cum_time":     "5m 23s",             // 累计运行时间
+ *   "cpu_percent":  45.2,                 // CPU 使用率 (%)
+ *   "mem_mb":       128.5,                // 内存使用 (MB)
+ *   "timestamp":    "2026-06-29T12:34:56Z" // 时间戳
+ * }
  */
 
 // ===================== 包含头文件 =====================
@@ -70,13 +84,14 @@ Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);
 // ===================== 全局变量 =====================
 // 当前状态
 String agent_status  = "idle";       // idle / working / waiting / error
-String agent_name    = "hermes";
+String agent         = "hermes";     // Agent 名称 (原 agent_name)
 String model_name    = "unknown";
-String task_desc     = "";
+String task_desc     = "";           // 任务描述 (原 task → task_summary)
 int    context_len   = 0;
 String cum_time      = "0s";
 float  cpu_percent   = 0.0;
 float  mem_mb        = 0.0;
+String timestamp     = "";           // ISO 8601 时间戳
 
 // LED 呼吸效果控制
 unsigned long lastLedUpdate  = 0;
@@ -141,8 +156,13 @@ void setup() {
   ledStrip.show();              // 关闭所有 LED
   Serial.println(F("[LED] WS2812B 初始化完成"));
 
-  // 连接 WiFi
+  // 连接 WiFi (Wokwi 模拟中跳过实际 WiFi 连接)
+#ifndef WOKWI
   setupWiFi();
+#else
+  Serial.println(F("[WOKWI] 模拟模式 - 跳过 WiFi 连接"));
+  Serial.println(F("[WOKWI] MQTT 将使用 Wokwi 内置的 MQTT 客户端"));
+#endif
 
   // 配置 MQTT
   setupMQTT();
@@ -301,35 +321,38 @@ void parseStatusJson(const char* json) {
     return;
   }
 
-  // 提取字段
-  const char* status    = doc["status"]     | "idle";
-  const char* name      = doc["agent_name"] | "hermes";
-  const char* model     = doc["model"]      | "unknown";
-  const char* task      = doc["task"]       | "";
-  int         ctxLen    = doc["context_len"]| 0;
-  const char* cumT      = doc["cum_time"]   | "0s";
-  float       cpu       = doc["cpu_percent"]| 0.0;
-  float       mem       = doc["mem_mb"]     | 0.0;
+  // 提取字段 (新 JSON 格式: agent, task_summary, timestamp)
+  const char* status    = doc["status"]       | "idle";
+  const char* name      = doc["agent"]        | "hermes";
+  const char* model     = doc["model"]        | "unknown";
+  const char* task      = doc["task_summary"] | "";
+  int         ctxLen    = doc["context_len"]  | 0;
+  const char* cumT      = doc["cum_time"]     | "0s";
+  float       cpu       = doc["cpu_percent"]  | 0.0;
+  float       mem       = doc["mem_mb"]       | 0.0;
+  const char* ts        = doc["timestamp"]    | "";
 
   // 更新全局变量
   agent_status = String(status);
-  agent_name   = String(name);
+  agent        = String(name);
   model_name   = String(model);
   task_desc    = String(task);
   context_len  = ctxLen;
   cum_time     = String(cumT);
   cpu_percent  = cpu;
   mem_mb       = mem;
+  timestamp    = String(ts);
 
   Serial.println(F("[JSON] 解析完成:"));
-  Serial.print(F("  status:      ")); Serial.println(agent_status);
-  Serial.print(F("  agent_name:  ")); Serial.println(agent_name);
-  Serial.print(F("  model:       ")); Serial.println(model_name);
-  Serial.print(F("  task:        ")); Serial.println(task_desc);
-  Serial.print(F("  context_len: ")); Serial.println(context_len);
-  Serial.print(F("  cum_time:    ")); Serial.println(cum_time);
-  Serial.print(F("  cpu_percent: ")); Serial.println(cpu_percent);
-  Serial.print(F("  mem_mb:      ")); Serial.println(mem_mb);
+  Serial.print(F("  status:       ")); Serial.println(agent_status);
+  Serial.print(F("  agent:        ")); Serial.println(agent);
+  Serial.print(F("  model:        ")); Serial.println(model_name);
+  Serial.print(F("  task_summary: ")); Serial.println(task_desc);
+  Serial.print(F("  context_len:  ")); Serial.println(context_len);
+  Serial.print(F("  cum_time:     ")); Serial.println(cum_time);
+  Serial.print(F("  cpu_percent:  ")); Serial.println(cpu_percent);
+  Serial.print(F("  mem_mb:       ")); Serial.println(mem_mb);
+  Serial.print(F("  timestamp:    ")); Serial.println(timestamp);
 }
 
 // ===================== LED 更新 =====================
@@ -412,7 +435,7 @@ void updateDisplay() {
     statusIcon = "[?]";       // 未知
   }
 
-  display.print(agent_name);
+  display.print(agent);
   display.print(" ");
   display.println(statusIcon);
 
