@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+
+# Arduino
+firmware/*/build/
+firmware/*/.pio/
+
+# MQTT
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
