@@ -447,12 +447,14 @@ void processSerialCommand() {
     Serial.println(F("  test:error    — 切换到 ERROR 状态"));
     Serial.println(F("  status        — 显示当前状态"));
     Serial.println(F("  help          — 显示此帮助"));
+    Serial.println(F("  {JSON}        — 发送状态 JSON (Serial 直连模式)"));
 
-  // === set_wifi JSON 命令 ===
+  // === JSON 消息处理 (状态更新 或 set_wifi 命令) ===
   } else if (cmd.startsWith("{")) {
-    StaticJsonDocument<256> doc;
+    StaticJsonDocument<512> doc;
     DeserializationError err = deserializeJson(doc, cmd);
     if (!err) {
+      // 如果是 set_wifi 命令
       const char* c = doc["cmd"];
       if (c && strcmp(c, "set_wifi") == 0) {
         const char* ssid = doc["ssid"];
@@ -463,10 +465,16 @@ void processSerialCommand() {
           WiFi.disconnect();
           WiFi.begin(ssid, pass);
         }
+        return;
       }
-    } else {
-      Serial.println(F("[CMD] 无法识别的命令，输入 help 查看帮助"));
+      // 否则尝试作为状态 JSON 解析 (Serial 直连模式)
+      if (doc.containsKey("status")) {
+        Serial.println(F("[SERIAL] 收到 JSON 状态消息"));
+        parseStatusJson(cmd.c_str());
+        return;
+      }
     }
+    Serial.println(F("[CMD] 无法识别的 JSON，输入 help 查看帮助"));
   } else {
     Serial.println(F("[CMD] 无法识别的命令，输入 help 查看帮助"));
   }
