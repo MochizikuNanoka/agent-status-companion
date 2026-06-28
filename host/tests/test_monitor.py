@@ -3,12 +3,8 @@
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-from status_model import StatusMessage, AgentStatus
+from src.status_model import StatusMessage, AgentStatus
 
 
 class TestHermesMonitor:
@@ -17,9 +13,8 @@ class TestHermesMonitor:
     @patch("src.hermes_monitor.psutil")
     def test_agent_not_running_returns_idle(self, mock_psutil):
         """Agent 未运行时返回 IDLE 状态"""
-        from hermes_monitor import HermesMonitor
+        from src.hermes_monitor import HermesMonitor
 
-        # 模拟无进程
         mock_psutil.process_iter.return_value = []
 
         monitor = HermesMonitor()
@@ -32,10 +27,11 @@ class TestHermesMonitor:
     @patch("src.hermes_monitor.psutil")
     def test_agent_running_detects_process(self, mock_psutil):
         """Agent 运行时能检测进程"""
-        from hermes_monitor import HermesMonitor
+        from src.hermes_monitor import HermesMonitor
 
         mock_proc = MagicMock()
         mock_proc.info = {"name": "hermes.exe", "pid": 12345}
+        mock_proc.as_dict.return_value = {"name": "hermes.exe", "pid": 12345}
         mock_proc.cpu_percent.return_value = 45.0
         mock_psutil.process_iter.return_value = [mock_proc]
 
@@ -46,16 +42,18 @@ class TestHermesMonitor:
             AgentStatus.IDLE,
             AgentStatus.WORKING,
             AgentStatus.WAITING,
+            AgentStatus.ERROR,
         ]
         assert status.cpu_percent >= 0
 
     @patch("src.hermes_monitor.psutil")
     def test_returns_cpu_and_memory(self, mock_psutil):
         """返回正确的 CPU 和内存数据"""
-        from hermes_monitor import HermesMonitor
+        from src.hermes_monitor import HermesMonitor
 
         mock_proc = MagicMock()
         mock_proc.info = {"name": "hermes.exe", "pid": 12345}
+        mock_proc.as_dict.return_value = {"name": "hermes.exe", "pid": 12345}
         mock_proc.cpu_percent.return_value = 67.5
         mock_proc.memory_info.return_value = Mock(rss=256 * 1024 * 1024)
         mock_psutil.process_iter.return_value = [mock_proc]
@@ -67,30 +65,25 @@ class TestHermesMonitor:
         assert status.mem_mb == pytest.approx(256.0, rel=0.1)
 
 
-class TestConfig:
-    """配置管理测试"""
+class TestAppConfig:
+    """AppConfig 配置管理测试"""
 
     def test_config_defaults(self):
-        from config import Config
-        cfg = Config()
+        from src.config import AppConfig
+        cfg = AppConfig()
         assert cfg.mqtt_broker == "localhost"
         assert cfg.mqtt_port == 1883
         assert cfg.mqtt_topic == "agent/status"
 
-    def test_config_from_env(self):
-        import os
-        from config import Config
+    def test_config_from_env(self, monkeypatch):
+        from src.config import AppConfig
 
-        os.environ["AGENT_COMPANION_MQTT_BROKER"] = "test-broker"
-        os.environ["AGENT_COMPANION_MQTT_PORT"] = "8883"
+        monkeypatch.setenv("MQTT_BROKER", "test-broker")
+        monkeypatch.setenv("MQTT_PORT", "8883")
 
-        cfg = Config()
+        cfg = AppConfig()
         assert cfg.mqtt_broker == "test-broker"
         assert cfg.mqtt_port == 8883
-
-        # 清理
-        del os.environ["AGENT_COMPANION_MQTT_BROKER"]
-        del os.environ["AGENT_COMPANION_MQTT_PORT"]
 
 
 class TestStatusMessageVariants:

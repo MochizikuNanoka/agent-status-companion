@@ -4,13 +4,8 @@
 import json
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-import sys
-from pathlib import Path
 
-# 添加 src 目录到路径
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-from status_model import StatusMessage, AgentStatus
+from src.status_model import StatusMessage, AgentStatus
 
 
 class TestStatusMessage:
@@ -55,13 +50,13 @@ class TestStatusMessage:
         assert AgentStatus.ERROR.value == "error"
 
 
-class TestMQTTPublisher:
-    """MQTT 发布者测试 (mock)"""
+class TestMqttPublisher:
+    """MqttPublisher 发布者测试"""
 
     @patch("src.mqtt_publisher.mqtt")
     def test_connect(self, mock_mqtt):
-        from mqtt_publisher import MQTTPublisher
-        pub = MQTTPublisher(broker="localhost")
+        from src.mqtt_publisher import MqttPublisher
+        pub = MqttPublisher(broker="localhost")
         pub.connect()
         mock_mqtt.Client.assert_called_once()
 
@@ -70,18 +65,18 @@ class TestMQTTPublisher:
         mock_client = MagicMock()
         mock_mqtt.Client.return_value = mock_client
 
-        from mqtt_publisher import MQTTPublisher
-        pub = MQTTPublisher(broker="localhost")
+        from src.mqtt_publisher import MqttPublisher
+        pub = MqttPublisher(broker="localhost")
         pub._client = mock_client
+        pub._connected = True  # 模拟已连接状态
 
         msg = StatusMessage(status=AgentStatus.WORKING, model="test")
         pub.publish(msg)
 
-        # 验证 publish 被调用，参数包含 JSON
         mock_client.publish.assert_called_once()
-        args = mock_client.publish.call_args[0]
-        assert args[0] == "agent/status"  # topic
-        payload = json.loads(args[1])
+        kwargs = mock_client.publish.call_args.kwargs
+        payload = json.loads(kwargs["payload"])
+        assert kwargs["topic"] == "agent/status"
         assert payload["status"] == "working"
         assert payload["model"] == "test"
 
@@ -90,13 +85,14 @@ class TestMQTTPublisher:
         mock_client = MagicMock()
         mock_mqtt.Client.return_value = mock_client
 
-        from mqtt_publisher import MQTTPublisher
-        pub = MQTTPublisher(broker="localhost")
+        from src.mqtt_publisher import MqttPublisher
+        pub = MqttPublisher(broker="localhost")
         pub._client = mock_client
+        pub._connected = True  # 模拟已连接状态
 
         msg = StatusMessage(status=AgentStatus.IDLE)
         pub.publish(msg)
 
         mock_client.publish.assert_called_once()
-        payload = json.loads(mock_client.publish.call_args[0][1])
+        payload = json.loads(mock_client.publish.call_args.kwargs["payload"])
         assert payload["status"] == "idle"

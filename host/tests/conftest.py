@@ -3,5 +3,5 @@
 import sys
 from pathlib import Path
 
-# 确保 src 在路径中
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+# 添加项目根目录到路径，使 `import src.xxx` 可用
+sys.path.insert(0, str(Path(__file__).parent.parent))
