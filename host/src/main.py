@@ -17,7 +17,16 @@ from .config import load_config
 from .mqtt_publisher import MqttPublisher
 from .hermes_monitor import HermesMonitor
 from .aggregator import StatusAggregator
-from ..web.app import start_web_server
+
+# Web 模块在 src 包外，需要特殊处理
+try:
+    from ..web.app import start_web_server
+except ImportError:
+    import os as _os
+    _web_dir = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    import sys as _sys
+    _sys.path.insert(0, _web_dir)
+    from web.app import start_web_server
 
 logger = logging.getLogger(__name__)
 

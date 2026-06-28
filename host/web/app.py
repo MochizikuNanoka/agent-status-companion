@@ -15,7 +15,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from ..src.status_model import StatusMessage
+# src 在包外，需要特殊处理
+try:
+    from ..src.status_model import StatusMessage
+except ImportError:
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).parent.parent))
+    from src.status_model import StatusMessage
 
 logger = logging.getLogger(__name__)
 
