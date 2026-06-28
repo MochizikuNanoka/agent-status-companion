@@ -1,142 +1,213 @@
-# 组装与烧录指南 — AI Agent Status Companion
+# 组装、烧录与开发指南 — AI Agent Status Companion v2
 
-## 1. 准备工作
-
-### 需要安装的软件
-
-| 软件 | 下载链接 | 用途 |
-|------|----------|------|
-| Arduino IDE 2.x | https://www.arduino.cc/en/software | 编译烧录 ESP32 |
-| Python 3.11+ | https://www.python.org/ | 运行主机中间件 |
-| Mosquitto MQTT | https://mosquitto.org/download/ | MQTT Broker (可选，可用公共 broker) |
-| OpenSCAD (可选) | https://openscad.org/ | 预览/导出 3D 外壳 |
-
-### Arduino IDE 配置
-
-1. 打开 Arduino IDE → File → Preferences
-2. Additional Boards Manager URLs 添加：
-   ```
-   https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-   ```
-3. Tools → Board → Boards Manager → 搜索 "esp32" → 安装 "esp32 by Espressif Systems"
-
-### 安装 Arduino 库
-
-Tools → Manage Libraries → 搜索并安装：
-
-| 库名 | 作者 |
-|------|------|
-| PubSubClient | Nick O'Leary |
-| ArduinoJson | Benoît Blanchon |
-| Adafruit NeoPixel | Adafruit |
-| Adafruit SSD1306 | Adafruit |
-| Adafruit GFX Library | Adafruit |
+> 任务书_2 版本：真实 Hermes 连接 + Wokwi 模拟器开发 + PlatformIO
 
 ---
 
-## 2. 硬件组装
+## 1. 开发流程（强制顺序）
+
+```
+① Wokwi 模拟器开发固件 → ② 真实 Hermes 推送数据 → ③ 模拟器接收真实数据 → ④ 烧录实体 ESP32
+```
+
+---
+
+## 2. Wokwi 模拟器使用教程
+
+### 2.1 在线使用（推荐）
+
+1. 打开 https://wokwi.com/
+2. 点击 "New Project" → "Import from file"
+3. 导入 `simulation/wokwi/diagram.json`
+4. 将 `firmware/agent-status-companion/agent-status-companion.ino` 内容粘贴到代码编辑器
+5. 点击 "Start Simulation"
+
+Wokwi 会自动识别 `#ifndef WOKWI` 条件编译，跳过实际 WiFi 连接。
+
+### 2.2 测试 MQTT 通信
+
+```bash
+# 终端 1: 启动测试脚本（用公共 broker）
+cd simulation/
+python test_script.py --broker broker.emqx.io --loop
+
+# 终端 2: 启动 Python 主机中间件（模拟模式）
+cd host/
+python -m src.main --simulate --broker broker.emqx.io
+```
+
+测试脚本会循环发送 IDLE → WORKING → WAITING → ERROR 状态序列，观察 Wokwi 中 OLED 和 LED 变化。
+
+### 2.3 diagram.json 说明
+
+```json
+{
+  "parts": [
+    { "type": "wokwi-esp32-devkit-v1", "id": "esp32" },        // ESP32 开发板
+    { "type": "wokwi-ssd1306", "id": "oled1", "attrs": {} },   // SSD1306 OLED 128x64
+    { "type": "wokwi-neopixel-strip", "id": "led1", "attrs": {"pixelCount": "1"} }  // WS2812B LED
+  ],
+  "connections": [
+    ["esp32:3.3V", "oled1:VCC", "red"],      // OLED 供电
+    ["esp32:GND.1", "oled1:GND", "black"],
+    ["esp32:21", "oled1:SDA", "green"],       // I2C 数据
+    ["esp32:22", "oled1:SCL", "blue"],        // I2C 时钟
+    ["esp32:VIN", "led1:VCC", "red"],         // LED 5V 供电
+    ["esp32:GND.2", "led1:GND", "black"],
+    ["esp32:16", "led1:DIN", "purple"]        // LED 数据
+  ]
+}
+```
+
+---
+
+## 3. Hermes 监控实现细节
+
+### 3.1 数据源架构
+
+```
+┌──────────────────────────────────────────────────────┐
+│                   HermesMonitor                       │
+│                                                      │
+│  Primary:  agent.log 实时解析    ← 最高优先级         │
+│    ↓ 失败                                             │
+│  Fallback1: hermes status 子进程  ← CLI 调用          │
+│    ↓ 失败                                             │
+│  Fallback2: psutil 进程检测      ← 基础监控           │
+│    ↓ 失败                                             │
+│  IDLE 状态                                           │
+│                                                      │
+│  --simulate: 模拟模式，循环状态切换                    │
+└──────────────────────────────────────────────────────┘
+```
+
+### 3.2 日志格式解析
+
+Hermes 的 `agent.log` 中 API call 行格式：
+
+```
+2026-06-29 06:29:04,461 INFO [20260629_055232_7126c1] agent.conversation_loop: API call #60: model=deepseek-v4-pro provider=deepseek in=65171 out=718 total=65889 latency=6.9s cache=64256/65171 (99%)
+```
+
+提取字段：
+| 日志字段 | StatusMessage 字段 | 正则 |
+|----------|-------------------|------|
+| `model=deepseek-v4-pro` | `model` | `model=([\w./-]+)` |
+| `total=65889` | `context_len` | `total=(\d+)` |
+| `[20260629_055232_7126c1]` | (session 追踪) | `\[(\w+)\]` |
+| 最近 5s 内有新行 | `status=WORKING` | 时间戳差 |
+| 最近 30s 内无新行 | `status=IDLE` | 时间戳差 |
+
+### 3.3 hermes status 子进程
+
+```bash
+hermes status
+# 输出包含:
+# Model:        deepseek-v4-pro
+# Provider:     DeepSeek
+# Active:       1 session(s)
+```
+
+### 3.4 模拟模式
+
+```bash
+python -m src.main --simulate
+```
+
+每 8 秒自动循环：IDLE → WORKING → WAITING → IDLE，模拟真实 Agent 行为。用于无 Hermes 环境的开发和 Wokwi 测试。
+
+---
+
+## 4. 从模拟器迁移到实体硬件
 
 ### 步骤
 
-1. **焊接/连接 OLED**
-   - ESP32 GND → OLED GND
-   - ESP32 3.3V → OLED VCC
-   - ESP32 GPIO21 → OLED SDA
-   - ESP32 GPIO22 → OLED SCL
+1. **Wokwi 验证完成**
+   - 所有状态灯颜色正确
+   - OLED 显示正常（模型名、上下文长度、任务摘要）
+   - MQTT 消息能正确触发更新
 
-2. **焊接/连接 WS2812B LED**
-   - ESP32 GND → LED GND
-   - ESP32 5V/VIN → LED VCC（并联 100μF 电容）
-   - ESP32 GPIO16 → 330Ω 电阻 → LED DIN
-
-3. **固定到外壳**
-   - OLED 对准面板窗口，用热熔胶或螺丝固定
-   - LED 对准 LED 孔
-   - ESP32 用尼龙柱或热熔胶固定
-   - 盖板闭合
-
----
-
-## 3. 烧录固件
-
-1. 打开 `firmware/agent-status-companion/agent-status-companion.ino`
-2. **修改 WiFi 凭据**（第 46-47 行）：
+2. **移除 Wokwi 条件编译**
    ```cpp
-   #define WIFI_SSID        "你的WiFi名"
-   #define WIFI_PASS        "你的WiFi密码"
+   // 在 agent-status-companion.ino 中：
+   // 注释掉或删除 #ifndef WOKWI / #else / #endif 块
+   // 或定义 WOKWI_OFF 宏
+   #define WOKWI_OFF  // 强制使用真实 WiFi
    ```
-3. **修改 MQTT Broker**（第 52 行，默认用公共 broker 测试）：
+
+3. **配置 WiFi**
    ```cpp
-   #define MQTT_BROKER      "broker.emqx.io"  // 或用你自己的 Mosquitto
+   #define WIFI_SSID    "你的WiFi名"
+   #define WIFI_PASS    "你的WiFi密码"
    ```
-4. 选择 Board: `ESP32 Dev Module`
-5. 选择正确的 COM 口
-6. 点击 Upload（→ 箭头）
-7. 烧录完成后打开 Serial Monitor (115200 baud)，查看连接日志
 
-**预期输出：**
+4. **烧录 ESP32**
+   - 使用 Arduino IDE 或 PlatformIO:
+   ```bash
+   cd firmware/agent-status-companion/
+   pio run -t upload
+   pio device monitor
+   ```
+
+5. **启动真实 Hermes 监控**
+   ```bash
+   cd host/
+   python -m src.main --broker <你的MQTT broker IP>
+   ```
+
+6. **验证端到端**
+   - Hermes 执行任务 → OLED 显示 "Working" + 蓝色 LED
+   - Hermes 空闲 → OLED 显示 "Idle" + 绿色 LED
+   - 发送 MQTT 测试消息验证响应
+
+---
+
+## 5. PlatformIO 使用
+
+### 安装
+```bash
+pip install platformio
+# 或从 VS Code 扩展安装
 ```
-[WiFi] 连接中: YourWiFiSSID
-[WiFi] 已连接! IP: 192.168.1.100
-[MQTT] 连接中: broker.emqx.io:1883
-[MQTT] 已连接!
-[MAIN] Agent Status Companion 就绪
+
+### 编译 & 烧录
+```bash
+cd firmware/agent-status-companion/
+
+# 编译
+pio run
+
+# 烧录 + 串口监视
+pio run -t upload -t monitor
+
+# 仅监视
+pio device monitor
+```
+
+### 库依赖 (platformio.ini)
+```ini
+lib_deps =
+    knolleary/PubSubClient @ ^2.8
+    bblanchon/ArduinoJson @ ^7.0
+    adafruit/Adafruit NeoPixel @ ^1.12
+    adafruit/Adafruit SSD1306 @ ^2.5
+    adafruit/Adafruit GFX Library @ ^1.11
 ```
 
 ---
 
-## 4. 运行主机中间件
+## 6. 硬件接线（实体）
 
-```bash
-cd host/
-
-# 创建虚拟环境 (可选)
-python -m venv venv
-source venv/Scripts/activate  # Windows
-# source venv/bin/activate    # Linux/Mac
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 启动 (默认配置)
-python -m src.main
-
-# 自定义 MQTT broker
-python -m src.main --broker 192.168.1.50 --port 1883
-
-# 同时启动 Web 面板
-python -m src.main --web-port 8080
-```
-
-打开浏览器访问 `http://localhost:8080` 查看仪表盘。
-
----
-
-## 5. 验证端到端
-
-1. ESP32 上电，确认 OLED 显示 "Agent Status Companion" 启动画面
-2. 启动 Python 主机中间件
-3. 观察 OLED 显示状态变化（Idle → Working → Idle）
-4. LED 颜色随状态变化（绿/蓝/橙/红）
-5. 打开 Web 面板 `http://localhost:8080` 确认实时数据
-
-### 模拟 Agent 状态 (无需真实 Agent)
-
-```bash
-# 手动发送测试状态到 MQTT
-mosquitto_pub -h broker.emqx.io -t "agent/status" -m '{"status":"working","agent_name":"hermes","model":"deepseek-v4","task":"分析代码中...","context_len":8192,"cum_time":"2.5h","cpu_percent":45.2,"mem_mb":512.0}'
-
-mosquitto_pub -h broker.emqx.io -t "agent/status" -m '{"status":"idle","agent_name":"hermes","model":"","task":"","context_len":0,"cum_time":"2.8h","cpu_percent":2.1,"mem_mb":128.0}'
-```
+参考 `hardware/schematics/wiring.md`。
 
 ---
 
 ## 常见问题
 
-| 问题 | 解决方案 |
-|------|----------|
-| OLED 不显示 | 检查 I2C 地址 (使用 I2C Scanner 确认)，确认接线 |
-| LED 不亮 | 检查 5V 供电，LED 数据线方向 |
-| WiFi 连不上 | 确认 SSID/密码，ESP32 只支持 2.4GHz WiFi |
-| MQTT 连不上 | 检查 broker 地址，确认网络可达 |
-| 烧录失败 | 按住 BOOT 按钮再插 USB，松开后点击 Upload |
+| 问题 | 解决 |
+|------|------|
+| Wokwi OLED 不显示 | 刷新页面，确认 I2C 地址 0x3C |
+| Wokwi LED 不亮 | 检查 GPIO16 连接 |
+| agent.log 找不到 | Windows: `%LOCALAPPDATA%\hermes\logs\agent.log` |
+| MQTT 连不上 | 检查 broker 地址，ESP32 只支持 2.4GHz WiFi |
+| 烧录失败 | 按住 BOOT 再上电，松开后点击 Upload |
