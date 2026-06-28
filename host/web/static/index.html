@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hermes Agent 状态仪表盘</title>
+    <style>
+        /* 全局样式 - 深色主题 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .dashboard {
+            max-width: 800px;
+            width: 100%;
+            background: #161b22;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            border: 1px solid #30363d;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 32px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #21262d;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #f0f6fc;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header h1 .title-icon {
+            font-size: 28px;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+            background: #21262d;
+            border: 1px solid #30363d;
+        }
+
+        .status-badge .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .dot.idle   { background: #3fb950; box-shadow: 0 0 8px #3fb95088; }
+        .dot.working { background: #58a6ff; box-shadow: 0 0 8px #58a6ff88; }
+        .dot.waiting { background: #d29922; box-shadow: 0 0 8px #d2992288; }
+        .dot.error   { background: #f85149; box-shadow: 0 0 8px #f8514988; }
+        .dot.offline { background: #484f58; box-shadow: 0 0 8px #484f5888; }
+
+        /* 状态卡片网格 */
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: #0d1117;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #21262d;
+            transition: border-color 0.3s;
+        }
+
+        .card:hover {
+            border-color: #30363d;
+        }
+
+        .card.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .card-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: #8b949e;
+            margin-bottom: 8px;
+        }
+
+        .card-value {
+            font-size: 22px;
+            font-weight: 600;
+            color: #f0f6fc;
+            word-break: break-all;
+        }
+
+        .card-value.small {
+            font-size: 16px;
+        }
+
+        .card-value .mono {
+            font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+        }
+
+        .card-value .unit {
+            font-size: 14px;
+            color: #8b949e;
+            font-weight: 400;
+            margin-left: 4px;
+        }
+
+        /* 任务区域 */
+        .task-box {
+            background: #0d1117;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #21262d;
+            margin-bottom: 24px;
+        }
+
+        .task-box .label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: #8b949e;
+            margin-bottom: 8px;
+        }
+
+        .task-box .task-text {
+            font-size: 15px;
+            line-height: 1.6;
+            color: #c9d1d9;
+            font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+        }
+
+        .task-box .task-text.empty {
+            color: #484f58;
+            font-style: italic;
+        }
+
+        /* 连接状态 */
+        .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 16px;
+            border-top: 1px solid #21262d;
+            font-size: 12px;
+            color: #484f58;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .connection-status .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #484f58;
+        }
+
+        .connection-status .dot.connected {
+            background: #3fb950;
+        }
+
+        .connection-status .dot.disconnected {
+            background: #f85149;
+        }
+
+        /* 响应式布局 */
+        @media (max-width: 600px) {
+            .dashboard {
+                padding: 20px;
+            }
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            .header {
+                flex-direction: column;
+                gap: 12px;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <!-- 头部 -->
+        <div class="header">
+            <h1>
+                <span class="title-icon">&#9881;</span>
+                Hermes Agent
+            </h1>
+            <div class="status-badge">
+                <span class="dot offline" id="statusDot"></span>
+                <span id="statusText">连接中...</span>
+            </div>
+        </div>
+
+        <!-- 指标网格 -->
+        <div class="grid">
+            <div class="card">
+                <div class="card-label">Agent 名称</div>
+                <div class="card-value" id="agentName">-</div>
+            </div>
+            <div class="card">
+                <div class="card-label">当前模型</div>
+                <div class="card-value small" id="modelName">-</div>
+            </div>
+            <div class="card">
+                <div class="card-label">上下文长度</div>
+                <div class="card-value">
+                    <span class="mono" id="contextLen">0</span>
+                    <span class="unit">tokens</span>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-label">累计运行时间</div>
+                <div class="card-value" id="cumTime">0h</div>
+            </div>
+            <div class="card">
+                <div class="card-label">CPU 使用率</div>
+                <div class="card-value">
+                    <span class="mono" id="cpuPercent">0.0</span>
+                    <span class="unit">%</span>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-label">内存使用</div>
+                <div class="card-value">
+                    <span class="mono" id="memMb">0.0</span>
+                    <span class="unit">MB</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 任务区域 -->
+        <div class="task-box">
+            <div class="label">当前任务</div>
+            <div class="task-text empty" id="taskText">等待数据...</div>
+        </div>
+
+        <!-- 页脚 -->
+        <div class="footer">
+            <div class="connection-status">
+                <span class="dot disconnected" id="wsDot"></span>
+                <span id="wsLabel">WebSocket 断线</span>
+            </div>
+            <span id="updateTime">-</span>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // DOM 元素引用
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const agentName = document.getElementById('agentName');
+        const modelName = document.getElementById('modelName');
+        const contextLen = document.getElementById('contextLen');
+        const cumTime = document.getElementById('cumTime');
+        const cpuPercent = document.getElementById('cpuPercent');
+        const memMb = document.getElementById('memMb');
+        const taskText = document.getElementById('taskText');
+        const wsDot = document.getElementById('wsDot');
+        const wsLabel = document.getElementById('wsLabel');
+        const updateTime = document.getElementById('updateTime');
+
+        // 状态文本映射
+        const STATUS_LABELS = {
+            'idle': '空闲',
+            'working': '工作中',
+            'waiting': '等待中',
+            'error': '出错',
+            'offline': '离线',
+        };
+
+        /**
+         * 更新仪表盘 UI
+         * @param {Object} data - StatusMessage JSON 对象
+         */
+        function updateDashboard(data) {
+            // 更新状态灯和文本
+            const status = data.status || 'offline';
+            statusDot.className = 'dot ' + status;
+            statusText.textContent = STATUS_LABELS[status] || status;
+
+            // 基础信息
+            agentName.textContent = data.agent_name || '-';
+            modelName.textContent = data.model || '未指定';
+            contextLen.textContent = data.context_len != null ? data.context_len : 0;
+
+            // 累计时间
+            cumTime.textContent = data.cum_time || '0h';
+
+            // CPU / 内存
+            cpuPercent.textContent = data.cpu_percent != null
+                ? Number(data.cpu_percent).toFixed(1)
+                : '0.0';
+            memMb.textContent = data.mem_mb != null
+                ? Number(data.mem_mb).toFixed(1)
+                : '0.0';
+
+            // 任务文本
+            if (data.task) {
+                taskText.textContent = data.task;
+                taskText.className = 'task-text';
+            } else {
+                taskText.textContent = '无活动任务';
+                taskText.className = 'task-text empty';
+            }
+
+            // 更新时间
+            const now = new Date();
+            updateTime.textContent = '更新于 ' + now.toLocaleTimeString('zh-CN', { hour12: false });
+        }
+
+        /**
+         * 更新 WebSocket 连接状态指示灯
+         * @param {boolean} connected
+         */
+        function updateConnectionState(connected) {
+            wsDot.className = 'dot ' + (connected ? 'connected' : 'disconnected');
+            wsLabel.textContent = connected ? 'WebSocket 已连接' : 'WebSocket 断线';
+        }
+
+        /**
+         * 建立 WebSocket 连接
+         */
+        function connectWebSocket() {
+            // 自动判断协议
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = protocol + '//' + location.host + '/ws';
+
+            let ws = new WebSocket(wsUrl);
+            let reconnectTimer = null;
+            let heartbeatTimer = null;
+
+            ws.onopen = function() {
+                console.log('[WS] 已连接:', wsUrl);
+                updateConnectionState(true);
+
+                // 心跳保活（每 30 秒 ping 一次）
+                if (heartbeatTimer) clearInterval(heartbeatTimer);
+                heartbeatTimer = setInterval(function() {
+                    try {
+                        ws.send('ping');
+                    } catch(e) {
+                        // 忽略发送错误
+                    }
+                }, 30000);
+            };
+
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data === 'pong') return; // 心跳响应，忽略
+                    updateDashboard(data);
+                } catch (e) {
+                    console.warn('[WS] 解析消息失败:', e);
+                }
+            };
+
+            ws.onerror = function(err) {
+                console.error('[WS] 连接错误:', err);
+                updateConnectionState(false);
+            };
+
+            ws.onclose = function(event) {
+                console.log('[WS] 连接关闭 (code=' + event.code + ')');
+                updateConnectionState(false);
+                if (heartbeatTimer) clearInterval(heartbeatTimer);
+
+                // 自动重连（3 秒后）
+                if (reconnectTimer) clearTimeout(reconnectTimer);
+                reconnectTimer = setTimeout(function() {
+                    console.log('[WS] 尝试重连...');
+                    connectWebSocket();
+                }, 3000);
+            };
+        }
+
+        // ---- 启动 ----
+
+        // 先通过 REST API 获取初始状态
+        fetch('/api/status')
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                updateDashboard(data);
+                // 然后建立 WebSocket 实时连接
+                connectWebSocket();
+            })
+            .catch(function(err) {
+                console.warn('[REST] 获取初始状态失败:', err);
+                // 即使 REST 失败，也尝试 WebSocket
+                connectWebSocket();
+            });
+    })();
+    </script>
+</body>
+</html>
