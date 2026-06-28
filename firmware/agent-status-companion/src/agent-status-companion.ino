@@ -74,8 +74,8 @@
 
 // ===================== WiFi 配置 =====================
 // TODO: 在此处填写你的 WiFi 凭据
-#define WIFI_SSID        "YourWiFiSSID"
-#define WIFI_PASS        "YourWiFiPassword"
+#define WIFI_SSID        "YOUR_SSID"
+#define WIFI_PASS        "YOUR_PASSWORD"
 #define WIFI_TIMEOUT_MS  15000    // WiFi 连接超时 (毫秒)
 
 // ===================== MQTT 配置 =====================
