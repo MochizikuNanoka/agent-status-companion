@@ -154,8 +154,11 @@ class Application:
             logger.info("模式:    模拟模式")
         logger.info("=" * 50)
 
-        # 连接 MQTT
-        self._publisher.connect()
+        # 连接 MQTT（串口模式下如果没指定 broker 则跳过）
+        if self._serial_pub and self._args.broker is None:
+            logger.info("MQTT:    已跳过（串口模式，未指定 --broker）")
+        else:
+            self._publisher.connect()
 
         # 连接串口
         if self._serial_pub:
@@ -176,7 +179,8 @@ class Application:
             return
         logger.info("正在停止所有组件...")
         self._aggregator.stop()
-        self._publisher.disconnect()
+        if self._publisher.connected:
+            self._publisher.disconnect()
         if self._serial_pub:
             self._serial_pub.disconnect()
         self._running = False
