@@ -51,7 +51,7 @@
 
 // ===================== 包含头文件 =====================
 #include <WiFi.h>
-#include <PubSubClient.h>
+#include <WiFiUdp.h>
 #include <ArduinoJson.h>
 #ifndef NO_RGB_LED
 #include <Adafruit_NeoPixel.h>
@@ -59,6 +59,7 @@
 #include <Wire.h>
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_GFX.h>
+#include <LiquidCrystal.h>
 
 // ===================== 引脚定义 =====================
 // 暂时禁用 RGB LED（模组到货后删除此行以恢复 LED 功能）
@@ -73,9 +74,17 @@
 #define OLED_SDA         21       // SSD1306 I2C SDA
 #define OLED_SCL         22       // SSD1306 I2C SCL
 #define OLED_ADDR        0x3C     // SSD1306 I2C 地址
-#define OLED_WIDTH       128      // OLED 宽度 (像素)
-#define OLED_HEIGHT      64       // OLED 高度 (像素)
+#define OLED_WIDTH       64       // OLED 宽度 (像素) — 0.49寸
+#define OLED_HEIGHT      32       // OLED 高度 (像素)
 #define OLED_RESET       -1       // 不使用复位引脚
+
+// LCD 1602 并行引脚 (4-bit 模式)
+#define LCD_RS  12
+#define LCD_EN  14
+#define LCD_D4  26
+#define LCD_D5  25
+#define LCD_D6  33
+#define LCD_D7  32
 
 // ===================== WiFi 配置 =====================
 // TODO: 在此处填写你的 WiFi 凭据
@@ -88,11 +97,14 @@
 #define MQTT_PORT        1883                // MQTT 端口
 #define MQTT_TOPIC       "agent/status"      // 订阅主题
 #define MQTT_CLIENT_ID   "agent-status-companion-esp32"
-#define MQTT_KEEPALIVE   60                  // 心跳间隔 (秒)
+#define MQTT_KEEPALIVE   60
+
+// UDP 端口
+#define UDP_PORT  8888                  // 心跳间隔 (秒)
 
 // ===================== 全局对象 =====================
 WiFiClient wifiClient;
-PubSubClient mqttClient(wifiClient);
+WiFiUDP udp;
 #ifdef NO_RGB_LED
 // LED 禁用 — 空壳 stub
 struct DummyNeoPixel {
@@ -107,6 +119,9 @@ Adafruit_NeoPixel ledStrip(NUM_LEDS, LED_WS2812B_PIN, NEO_GRB + NEO_KHZ800);
 #endif
 Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);
 
+// LCD 1602 (4-bit 模式, 16列x2行)
+LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
+
 // ===================== 全局变量 =====================
 String agent_status  = "idle";
 String agent         = "hermes";
@@ -117,10 +132,14 @@ String cum_time      = "0s";
 float  cpu_percent   = 0.0;
 float  mem_mb        = 0.0;
 String timestamp     = "";
+String ctx_display   = "";          // 上下文显示 (如 "294.5K")
 
 // 硬件状态
 bool oledOk          = false;       // OLED 是否初始化成功
 bool wifiOk          = false;       // WiFi 是否连接
+bool hasData         = false;       // 是否收到过 JSON 数据
+int  dataVersion     = 0;           // 数据版本号，变化时更新显示
+int  lastDataVersion = -1;          // 上次显示时的版本号
 
 // LED 呼吸效果
 unsigned long lastLedUpdate  = 0;
@@ -198,6 +217,15 @@ void setup() {
     showWelcomeScreen();
   }
 
+  // === LCD 1602 初始化 ===
+  lcd.begin(16, 2);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Agent Companion");
+  lcd.setCursor(0, 1);
+  lcd.print("LCD Ready");
+  Serial.println(F("[LCD] 1602 初始化完成 (16x2, 4-bit)"));
+
   // === WS2812B LED 初始化 ===
   ledStrip.begin();
   ledStrip.setBrightness(50);
@@ -215,8 +243,10 @@ void setup() {
   setupWiFi();
 #endif
 
-  // === MQTT 配置 ===
-  setupMQTT();
+  // === UDP 监听 ===
+  udp.begin(UDP_PORT);
+  Serial.print(F("[UDP] 监听端口 "));
+  Serial.println(UDP_PORT);
 
   // === 启动完成 ===
   Serial.println(F("========================================"));
@@ -227,18 +257,16 @@ void setup() {
 
 // ===================== loop() =====================
 void loop() {
-  // === Serial 命令处理 ===
-  processSerialCommand();
-
-  // === MQTT 保持连接 ===
-  if (!mqttClient.connected()) {
-    unsigned long now = millis();
-    if (now - lastMqttReconnect >= MQTT_RECONNECT_INTERVAL) {
-      lastMqttReconnect = now;
-      reconnectMQTT();
-    }
-  } else {
-    mqttClient.loop();
+  // === UDP 数据接收 ===
+  int packetSize = udp.parsePacket();
+  if (packetSize) {
+    char buf[512];
+    int len = udp.read(buf, min(packetSize, 511));
+    buf[len] = '\0';
+    Serial.print(F("[UDP] 收到: "));
+    Serial.println(buf);
+    hasData = true;
+    parseStatusJson(buf);
   }
 
   // === LED 效果更新 ===
@@ -268,24 +296,16 @@ void loop() {
 // ===================== OLED 欢迎画面 =====================
 void showWelcomeScreen() {
   display.clearDisplay();
-  display.setTextSize(2);
+  display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(20, 10);
-  display.println(F("HERMES"));
-  display.setTextSize(1);
-  display.setCursor(10, 35);
-  display.println(F("Status Companion"));
-  display.setCursor(15, 50);
-  display.println(F("Hardware Ready"));
+  display.setCursor(0, 2);
+  display.println(F("Hermes Agent"));
+  display.setCursor(0, 14);
+  display.println(F("Companion v2"));
+  display.setCursor(0, 24);
+  display.println(F("Hardware OK"));
   display.display();
-  delay(2000);
-
-  // 滚动动画
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setCursor(5, 28);
-  display.println(F("Connecting..."));
-  display.display();
+  delay(1200);
 }
 
 // ===================== WiFi 连接 =====================
@@ -335,54 +355,7 @@ void setupWiFi() {
   ledStrip.show();
 }
 
-// ===================== MQTT 配置 =====================
-void setupMQTT() {
-  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-  mqttClient.setCallback(mqttCallback);
-  mqttClient.setKeepAlive(MQTT_KEEPALIVE);
-  Serial.print(F("[MQTT] Broker: "));
-  Serial.print(MQTT_BROKER);
-  Serial.print(F(":"));
-  Serial.println(MQTT_PORT);
-}
-
-// ===================== MQTT 回调 =====================
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  Serial.print(F("[MQTT] 收到消息 → "));
-
-  char json[length + 1];
-  memcpy(json, payload, length);
-  json[length] = '\0';
-
-  Serial.println(json);
-  parseStatusJson(json);
-}
-
-// ===================== MQTT 重连 =====================
-bool reconnectMQTT() {
-  if (mqttClient.connected()) return true;
-
-  mqttReconnectCount++;
-  Serial.print(F("[MQTT] 第 "));
-  Serial.print(mqttReconnectCount);
-  Serial.print(F(" 次重连尝试... "));
-
-  if (mqttClient.connect(MQTT_CLIENT_ID)) {
-    Serial.println(F("成功!"));
-    mqttReconnectCount = 0;
-    if (mqttClient.subscribe(MQTT_TOPIC)) {
-      Serial.print(F("[MQTT] 已订阅: "));
-      Serial.println(MQTT_TOPIC);
-    }
-    agent_status = "idle";
-    return true;
-  } else {
-    Serial.print(F("失败 (状态码: "));
-    Serial.print(mqttClient.state());
-    Serial.println(F(")"));
-    return false;
-  }
-}
+// ===================== UDP 数据接收（在 loop() 中处理） =====================
 
 // ===================== JSON 解析 =====================
 void parseStatusJson(const char* json) {
@@ -414,6 +387,9 @@ void parseStatusJson(const char* json) {
   cpu_percent  = cpu;
   mem_mb       = mem;
   timestamp    = String(ts);
+  const char* cd = doc["ctx_display"] | "";
+  ctx_display   = String(cd);
+  dataVersion++;  // 数据已更新
 
   Serial.print(F("[JSON] status=")); Serial.print(agent_status);
   Serial.print(F(" model=")); Serial.print(model_name);
@@ -450,8 +426,8 @@ void processSerialCommand() {
     Serial.print(F("  Memory:   ")); Serial.print(mem_mb); Serial.println(F(" MB"));
     Serial.print(F("  Timestamp:")); Serial.println(timestamp);
     Serial.print(F("  WiFi:     ")); Serial.println(wifiOk ? F("OK") : F("DOWN"));
-    Serial.print(F("  MQTT:     "));
-    Serial.println(mqttClient.connected() ? F("OK") : F("DOWN"));
+    Serial.print(F("  MQTT:     N/A (UDP mode)"));
+    Serial.println();
     Serial.print(F("  OLED:     ")); Serial.println(oledOk ? F("OK") : F("FAIL"));
 
   // === help ===
@@ -486,6 +462,7 @@ void processSerialCommand() {
       // 否则尝试作为状态 JSON 解析 (Serial 直连模式)
       if (doc.containsKey("status")) {
         Serial.println(F("[SERIAL] 收到 JSON 状态消息"));
+        hasData = true;
         parseStatusJson(cmd.c_str());
         return;
       }
@@ -561,92 +538,58 @@ void updateLED() {
 void updateDisplay() {
   if (!oledOk) return;
 
-  display.clearDisplay();
+  // 数据没变，跳过更新（避免闪烁）
+  if (dataVersion == lastDataVersion && hasData) return;
+  lastDataVersion = dataVersion;
 
-  // MQTT 断连提示
-  if (!mqttClient.connected()) {
+  // No data yet? Show waiting
+  if (!hasData) {
+    display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    display.setCursor(10, 20);
-    display.println(F("MQTT Disconnected"));
-    display.setCursor(10, 35);
-    display.print(F("Retry #"));
-    display.println(mqttReconnectCount);
+    display.setCursor(0, 2);
+    display.println(F("No Data"));
+    display.setCursor(0, 18);
+    display.println(F("Waiting UDP..."));
     display.display();
     return;
   }
 
-  // 第1行: Agent名称 + 状态图标
+  // OLED: 模型名 (滚动) + 上下文使用率
+  display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
+
+  // 模型名 — 超长自动滚动
   display.setCursor(0, 0);
+  int maxW = 10;
+  if (model_name.length() > maxW) {
+    int start = (millis() / 500) % (model_name.length() - maxW + 1);
+    display.println(model_name.substring(start, start + maxW));
+  } else {
+    display.println(model_name);
+  }
 
-  const char* icon;
-  if (agent_status == "idle")       icon = "[ ]";
-  else if (agent_status == "working") icon = "[>]";
-  else if (agent_status == "waiting") icon = "[~]";
-  else if (agent_status == "error")   icon = "[!]";
-  else                                icon = "[?]";
-
-  display.print(agent);
-  display.print(" ");
-  display.println(icon);
-
-  // 第2行: 模型名
   display.setCursor(0, 16);
-  display.print(F("Model: "));
-  display.println(model_name.length() > 16 ? model_name.substring(0, 15) + "..." : model_name);
-
-  // 第3行: 当前任务 (滚动)
-  display.setCursor(0, 32);
-  display.print(F("Task: "));
-  if (task_desc.length() > 0) {
-    int maxChars = 18;
-    if (task_desc.length() > maxChars) {
-      String displayTask = task_desc.substring(scrollOffset);
-      if (displayTask.length() > maxChars) displayTask = displayTask.substring(0, maxChars);
-      else scrollOffset = 0;
-      display.println(displayTask);
-
-      unsigned long now = millis();
-      if (now - lastScrollTime >= 400) {
-        lastScrollTime = now;
-        scrollOffset++;
-        if (scrollOffset > task_desc.length()) scrollOffset = 0;
-      }
-    } else {
-      display.println(task_desc);
-    }
-  } else {
-    display.println(F("-"));
-  }
-
-  // 第4行: 上下文 + 时间
-  display.setCursor(0, 48);
-  display.print(F("Ctx:"));
-  if (context_len >= 1024) {
-    display.print(context_len / 1024);
-    display.print(F("K "));
-  } else {
-    display.print(context_len);
-    display.print(F("  "));
-  }
-  display.print(F("Time:"));
+  display.print(F("Ctx: "));
   display.println(cum_time);
 
-  // 底部: CPU / 内存进度条
-  drawProgressBar(0, 56, 56, 6, constrain(cpu_percent / 100.0, 0.0, 1.0), SSD1306_WHITE);
-  display.setCursor(58, 56);
-  display.print((int)cpu_percent);
-  display.print(F("%"));
-
-  float memPct = constrain(mem_mb / 512.0, 0.0, 1.0);
-  drawProgressBar(88, 56, 40, 6, memPct, SSD1306_WHITE);
-  display.setCursor(88, 48);
-  display.print((int)mem_mb);
-  display.print(F("MB"));
-
   display.display();
+
+  // === LCD 1602 颜文字 ===
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  // Line1: 颜文字
+  if (agent_status == "idle")       lcd.print("(^-^) Zzz");
+  else if (agent_status == "working") lcd.print("(>_<) Busy");
+  else if (agent_status == "waiting") lcd.print("(o_o) Wait");
+  else if (agent_status == "error")   lcd.print("(x_x) Err!");
+  else                                lcd.print("(?_?) ???");
+
+  lcd.setCursor(0, 1);
+  // Line2: 上下文使用量
+  lcd.print(ctx_display);
+  lcd.print(F("/1M"));
 }
 
 // ===================== 进度条 =====================
@@ -663,8 +606,6 @@ void heartbeatPrint() {
     lastHeartbeat = now;
     Serial.print(F("[HEARTBEAT] WiFi:"));
     Serial.print(wifiOk ? F("OK") : F("DOWN"));
-    Serial.print(F(" MQTT:"));
-    Serial.print(mqttClient.connected() ? F("OK") : F("DOWN"));
     Serial.print(F(" Status:"));
     Serial.print(agent_status);
     Serial.print(F(" CPU:"));

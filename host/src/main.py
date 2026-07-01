@@ -167,12 +167,26 @@ class Application:
         # 启动聚合器
         self._aggregator.start()
 
-        # 启动 Web 服务器（阻塞）
-        start_web_server(
-            host=self._config.web_host,
-            port=self._config.web_port,
-            aggregator=self._aggregator,
-        )
+        # 启动 Web 服务器（后台线程，端口冲突不阻塞主流程）
+        import threading
+        def _start_web():
+            try:
+                start_web_server(
+                    host=self._config.web_host,
+                    port=self._config.web_port,
+                    aggregator=self._aggregator,
+                )
+            except Exception as e:
+                logger.warning("Web panel failed: %s (serial mode ok)", e)
+        threading.Thread(target=_start_web, daemon=True).start()
+
+        # 保持主线程运行
+        import time
+        try:
+            while self._running:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
 
     def stop(self) -> None:
         if not self._running:

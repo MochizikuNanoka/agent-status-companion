@@ -138,15 +138,18 @@ class StatusAggregator:
         # 保存最新快照
         self._latest_status = current
 
-        # 检测状态变化（使用 task_summary 字段）
+        # 检测状态变化
         changed = self._has_changed(current)
 
-        if changed:
+        # 串口模式下每次都推送（时间会更新），MQTT 模式下仅变更时推送
+        has_serial = len(self._subscribers) > 0
+
+        if changed or has_serial:
             # 发布到 MQTT
-            if self._publisher.connected:
+            if self._publisher.connected and changed:
                 self._publisher.publish(current)
 
-            # 通知所有订阅者
+            # 通知所有订阅者（串口每次推送）
             for callback in self._subscribers:
                 try:
                     callback(current)
@@ -155,7 +158,7 @@ class StatusAggregator:
 
             self._last_published = current
             logger.debug(
-                "状态变更: %s | 模型=%s | 任务=%s | CPU=%.1f%% MEM=%.1fMB",
+                "推送状态: %s | 模型=%s | 任务=%s | CPU=%.1f%% MEM=%.1fMB",
                 current.status.value,
                 current.model or "-",
                 (current.task_summary or "-")[:40],
