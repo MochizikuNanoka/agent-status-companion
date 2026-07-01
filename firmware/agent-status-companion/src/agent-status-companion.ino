@@ -543,8 +543,10 @@ void updateLED() {
 void updateDisplay() {
   if (!oledOk) return;
 
-  // 数据没变，跳过更新（避免闪烁）
-  if (dataVersion == lastDataVersion && hasData) return;
+  // 数据没变且无需滚动 → 跳过更新（避免闪烁）
+  // 但如果模型名超长需要滚动，即使数据没变也要更新
+  bool needScroll = (oled_line1.length() > 10);
+  if (dataVersion == lastDataVersion && hasData && !needScroll) return;
   lastDataVersion = dataVersion;
 
   // No data yet? Show waiting
