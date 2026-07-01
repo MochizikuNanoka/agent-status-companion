@@ -560,37 +560,47 @@ void updateDisplay() {
     return;
   }
 
-  // OLED: 模型名 + 上下文使用率 (64px宽=10字符, 超出截断)
+  // OLED: 模型名(超长自动滚动) + 上下文使用率
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
 
-  display.setCursor(0, 0);
-  // 截断过长模型名适配 64px OLED
-  String line1 = oled_line1.length() > 10 ? oled_line1.substring(0, 10) : oled_line1;
-  display.println(line1);
+  // 模型名 — 超 10 字符时滚动
+  const int OLED_CHARS = 10;  // 64px / 6px per char
+  if (oled_line1.length() > OLED_CHARS) {
+    unsigned long now = millis();
+    if (now - lastScrollTime > 400) {
+      lastScrollTime = now;
+      scrollOffset++;
+      if (scrollOffset > oled_line1.length() - OLED_CHARS + 5)
+        scrollOffset = 0;  // 末尾停顿 + 回绕
+    }
+    display.setCursor(0, 0);
+    display.println(oled_line1.substring(scrollOffset, scrollOffset + OLED_CHARS));
+  } else {
+    display.setCursor(0, 0);
+    display.println(oled_line1);
+  }
 
+  // cum_time 已含 "Ctx: " 前缀 (来自 config.yaml)
   display.setCursor(0, 16);
-  display.print(F("Ctx: "));
-  String line2 = cum_time.length() > 8 ? cum_time.substring(0, 8) : cum_time;
-  display.println(line2);
+  display.println(cum_time);
 
   display.display();
 
   // === LCD 1602 颜文字（增量更新 — 内容不变就不刷新，消除闪烁） ===
   static String lastLcdLine1 = "";
   static String lastLcdLine2 = "";
-  String newLine2 = ctx_display + "/1M";
+  // ctx_display 已含 "/1M" (来自 config.yaml)，固件不再追加
 
-  if (lcd_line1_str != lastLcdLine1 || newLine2 != lastLcdLine2) {
+  if (lcd_line1_str != lastLcdLine1 || ctx_display != lastLcdLine2) {
     lastLcdLine1 = lcd_line1_str;
-    lastLcdLine2 = newLine2;
+    lastLcdLine2 = ctx_display;
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print(lcd_line1_str);
     lcd.setCursor(0, 1);
     lcd.print(ctx_display);
-    lcd.print(F("/1M"));
   }
 }
 
