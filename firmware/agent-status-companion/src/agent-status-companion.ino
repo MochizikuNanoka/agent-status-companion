@@ -53,12 +53,17 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#ifndef NO_RGB_LED
 #include <Adafruit_NeoPixel.h>
+#endif
 #include <Wire.h>
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_GFX.h>
 
 // ===================== 引脚定义 =====================
+// 暂时禁用 RGB LED（模组到货后删除此行以恢复 LED 功能）
+#define NO_RGB_LED
+
 #ifdef WOKWI
   #define LED_WS2812B_PIN  16     // Wokwi 模拟器引脚
 #else
@@ -88,7 +93,18 @@
 // ===================== 全局对象 =====================
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
+#ifdef NO_RGB_LED
+// LED 禁用 — 空壳 stub
+struct DummyNeoPixel {
+    void begin() {}
+    void setBrightness(int) {}
+    void setPixelColor(int, uint32_t) {}
+    void show() {}
+    static uint32_t Color(int, int, int) { return 0; }
+} ledStrip;
+#else
 Adafruit_NeoPixel ledStrip(NUM_LEDS, LED_WS2812B_PIN, NEO_GRB + NEO_KHZ800);
+#endif
 Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);
 
 // ===================== 全局变量 =====================
@@ -509,6 +525,9 @@ void applyTestState(const char* state) {
 
 // ===================== LED 更新 =====================
 void updateLED() {
+#ifdef NO_RGB_LED
+    return;  // LED 禁用
+#endif
   unsigned long now = millis();
   if (now - lastLedUpdate < 30) return;  // ~33fps
   lastLedUpdate = now;
