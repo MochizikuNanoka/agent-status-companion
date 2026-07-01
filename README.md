@@ -1,91 +1,109 @@
-# Agent Status Companion — v2
+# Agent Status Companion
 
-> 任务书_2：真实 Hermes WebSocket/日志连接 + Wokwi 模拟器开发 + PlatformIO
+ESP32 桌面硬件伴侣 — 实时显示 Hermes Agent 运行状态（OLED + LCD 双屏）。
 
-ESP32 桌面伴侣硬件 — 实时显示 Hermes Agent 状态（RGB LED + OLED 屏幕）。
-
-## 架构
+## 效果
 
 ```
-┌──────────────┐  agent.log     ┌──────────────┐  MQTT JSON    ┌──────────────┐
-│  Hermes      │ ────────────→  │ Python 中间件  │ ────────────→ │ ESP32 固件    │
-│ (实时运行)    │  hermes status │ (监控+聚合)    │               │ (LED + OLED) │
-└──────────────┘                └──────────────┘               └──────────────┘
-                                       │
-                                       ├── Web 面板 (FastAPI:8080)
-                                       ├── Wokwi 模拟器支持
-                                       └── 模拟模式 (--simulate)
+OLED (64×32)          LCD 1602 (16×2)
+┌──────────┐          ┌──────────────────┐
+│deepseek-v4│          │(◔_◔) Busy        │
+│Ctx: 29%   │          │294.5K/1M         │
+└──────────┘          └──────────────────┘
+```
+
+状态自动切换：idle → working → waiting，颜文字和颜色跟 Hermes TUI 同步。
+
+## 工作原理
+
+```
+Hermes CLI 运行中 → agent.log → push_to_esp32.py → UDP广播 → ESP32 → OLED + LCD
+                                ↑ 50ms 文件指针跟踪          ↑ 192.168.0.255:8888
 ```
 
 ## 快速开始
 
+### 1. 烧录固件（首次）
+
 ```bash
-# 1. 安装 Python 依赖
-cd host && pip install -r requirements.txt
-
-# 2. 模拟模式（无需真实 Hermes）
-python -m src.main --simulate
-
-# 3. 真实 Hermes 模式
-python -m src.main
-
-# 4. Web 面板 → http://localhost:8080
+export PATH="$PATH:$HOME/.platformio/penv/Scripts"
+cd firmware/agent-status-companion
+pio run -t upload -e esp32dev
 ```
 
-## Wokwi 模拟器
+### 2. 启动推送
 
-1. 打开 https://wokwi.com/ → Import `simulation/wokwi/diagram.json`
-2. 粘贴 `firmware/agent-status-companion/agent-status-companion.ino`
-3. 运行测试脚本: `python simulation/test_script.py --broker broker.emqx.io --loop`
+```bash
+cd host
+python push_to_esp32.py
+```
+
+终端会打印实时状态，ESP32 的 OLED 和 LCD 同步显示。
+
+### 3. 自定义显示
+
+编辑 `host/config.yaml`，改颜文字、显示格式、状态简称，无需重烧固件：
+
+```yaml
+kaomoji:
+  idle: "(^_^)"
+  working: "(◔_◔)"
+  waiting: "(◕‿◕✿)"
+
+display:
+  oled_line1: "{model}"
+  oled_line2: "Ctx: {ctx_pct}"
+  lcd_line1: "{kaomoji} {status_short}"
+  lcd_line2: "{ctx_k}/1M"
+```
+
+## 硬件
+
+| 组件 | 规格 | 引脚 |
+|------|------|------|
+| ESP32 | DevKit CH340 | COM3 |
+| OLED | SSD1306 64×32 I2C 0x3C | SDA=21, SCL=22 |
+| LCD | 1602A 16×2 并行 4-bit | RS=12, EN=14, D4=26, D5=25, D6=33, D7=32 |
+| LED | WS2812B | GPIO4 (暂禁用) |
+
+## JSON 协议
+
+```json
+{
+  "status": "working",
+  "agent": "hermes",
+  "model": "deepseek-v4-pro",
+  "context_len": 294898,
+  "cum_time": "5h30m",
+  "timestamp": "2026-07-02T...",
+  "oled_line1": "deepseek-v4-pro",
+  "lcd_line1": "(◔_◔) Busy",
+  "ctx_display": "294.5K/1M"
+}
+```
 
 ## 项目结构
 
 ```
 agent-status-companion/
 ├── firmware/agent-status-companion/
-│   ├── agent-status-companion.ino    # ESP32 固件 (Wokwi 兼容)
-│   └── platformio.ini                # PlatformIO 配置
+│   ├── src/agent-status-companion.ino   # ESP32 固件
+│   └── platformio.ini                   # PlatformIO 配置
 ├── host/
-│   ├── src/
-│   │   ├── config.py                 # 配置管理
-│   │   ├── status_model.py           # 数据模型 (v2 JSON)
-│   │   ├── mqtt_publisher.py         # MQTT 发布
-│   │   ├── hermes_monitor.py         # Hermes 监控 (日志/CLI/进程)
-│   │   ├── aggregator.py             # 状态聚合
-│   │   └── main.py                   # CLI 入口
-│   ├── web/                          # FastAPI 面板
-│   └── tests/                        # 42 项测试
+│   ├── push_to_esp32.py                 # 主推送脚本（唯一入口）
+│   └── config.yaml                      # 显示配置（改颜文字/格式）
 ├── simulation/
-│   ├── wokwi/diagram.json            # Wokwi 电路图
-│   ├── wokwi/project.json            # Wokwi 项目文件
-│   └── test_script.py                # MQTT 测试脚本
-├── hardware/                         # 接线图 + 3D 外壳
-└── docs/                             # 文档
+│   └── wokwi/                           # Wokwi 模拟器
+├── hardware/
+│   ├── schematics/wiring.md             # 接线图
+│   └── enclosure/                       # 3D 外壳 (OpenSCAD)
+└── docs/
 ```
 
-## JSON 协议 v2
+## 技术要点
 
-```json
-{
-  "agent": "hermes",
-  "status": "working",
-  "model": "deepseek-v4-pro",
-  "context_len": 65889,
-  "cum_time": "67m",
-  "task_summary": "Researching AI gadgets...",
-  "timestamp": "2026-06-29T06:29:04Z",
-  "cpu_percent": 45.2,
-  "mem_mb": 512.0
-}
-```
-
-## 状态映射
-
-| Agent 状态 | LED 颜色 | OLED 显示 |
-|-----------|---------|-----------|
-| IDLE (空闲) | 绿色常亮 | Idle |
-| WORKING (工作中) | 蓝色呼吸 | 当前模型+任务 |
-| WAITING (等待) | 橙色呼吸 | Waiting... |
-| ERROR (错误) | 红色闪烁 | Error |
-
-## 硬件成本: ¥30-55
+- **50ms 实时跟踪**：文件指针 `readline()` + 读增量，不用轮询
+- **0.5s 状态防抖**：消除 working↔idle 快速切换导致的 OLED 闪烁
+- **会话时间持久化**：`.session_start.txt` 防重启丢失
+- **哑终端架构**：固件只渲染，格式在 `config.yaml` 定义
+- **UDP 广播**：无需知道 ESP32 IP，无需 broker，比串口/MQTT 可靠
