@@ -13,19 +13,19 @@
       }
     },
     {
-      "type": "board-ssd1306",
+      "type": "wokwi-ssd1306",
       "id": "oled1",
-      "top": 30,
-      "left": -350,
+      "top": 50,
+      "left": 300,
       "attrs": {
-        "addr": "0x3C"
+        "i2c-address": "0x3C"
       }
     },
     {
-      "type": "wokwi-neopixel",
+      "type": "wokwi-neopixel-strip",
       "id": "neo1",
-      "top": 100,
-      "left": -350,
+      "top": 50,
+      "left": 500,
       "attrs": {
         "pixels": "1"
       }
@@ -33,7 +33,7 @@
     {
       "type": "wokwi-mqtt-client",
       "id": "mqtt1",
-      "top": 180,
+      "top": 250,
       "left": 0,
       "attrs": {
         "broker": "broker.emqx.io",
@@ -44,13 +44,13 @@
     }
   ],
   "connections": [
-    ["esp:GND.1", "oled1:GND", "black", ["v"]],
-    ["esp:3V3.1", "oled1:VCC", "red", ["v"]],
-    ["esp:GND.1", "neo1:GND", "black", ["v"]],
-    ["esp:VIN.1", "neo1:VCC", "red", ["v"]],
-    ["esp:D21", "oled1:SDA", "green", ["v"]],
-    ["esp:D22", "oled1:SCL", "yellow", ["v"]],
-    ["esp:D16", "neo1:DIN", "blue", ["v"]]
+    ["esp:GND.1", "oled1:GND", "black", ["v-10", "h-20"]],
+    ["esp:3V3.1", "oled1:VCC", "red", ["v-10", "h-20"]],
+    ["esp:21", "oled1:SDA", "green", ["v0"]],
+    ["esp:22", "oled1:SCL", "yellow", ["v0"]],
+    ["esp:GND.2", "neo1:GND", "black", ["v-10", "h-20"]],
+    ["esp:VIN.1", "neo1:VCC", "red", ["v-10", "h-20"]],
+    ["esp:16", "neo1:DIN", "blue", ["v0"]]
   ],
   "dependencies": {}
 }
