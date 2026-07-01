@@ -1,0 +1,33 @@
+# Agent Status Companion — 电脑端配置
+# 编辑此文件后重启 push_to_esp32.py 即可生效
+
+udp:
+  broadcast: "192.168.0.255"
+  port: 8888
+
+monitor:
+  poll_interval: 1          # 轮询间隔(秒)
+  working_timeout: 8        # 最近 N 秒有 API call 判定为 working
+  max_context: 1000000      # 最大上下文(用于百分比)
+
+display:
+  oled_line1: "{model}"               # 支持: {model} {status} {ctx_pct} {ctx_k}
+  oled_line2: "Ctx: {ctx_pct}"        # 支持: {model} {status} {ctx_pct} {ctx_k}
+  lcd_line1: "{kaomoji} {status_short}" # 支持: {kaomoji} {status} {status_short}
+  lcd_line2: "{ctx_k}/1M"             # 支持: {ctx_k} {ctx_pct} {status}
+
+# 状态颜文字(可自定义)
+kaomoji:
+  idle: "(^-^)"
+  working: "(>_<)"
+  waiting: "(o_o)"
+  error: "(x_x)"
+  unknown: "(?_?)"
+
+# 状态简称
+status_short:
+  idle: "Zzz"
+  working: "Busy"
+  waiting: "Wait"
+  error: "Err!"
+  unknown: "???"

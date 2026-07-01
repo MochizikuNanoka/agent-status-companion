@@ -65,11 +65,7 @@
 // 暂时禁用 RGB LED（模组到货后删除此行以恢复 LED 功能）
 #define NO_RGB_LED
 
-#ifdef WOKWI
-  #define LED_WS2812B_PIN  16     // Wokwi 模拟器引脚
-#else
-  #define LED_WS2812B_PIN  4      // 真实硬件引脚 (实际接线)
-#endif
+#define LED_WS2812B_PIN  4      // WS2812B 数据引脚 (暂时禁用 — NO_RGB_LED)
 #define NUM_LEDS         1        // LED 数量
 #define OLED_SDA         21       // SSD1306 I2C SDA
 #define OLED_SCL         22       // SSD1306 I2C SCL
@@ -133,12 +129,15 @@ float  cpu_percent   = 0.0;
 float  mem_mb        = 0.0;
 String timestamp     = "";
 String ctx_display   = "";          // 上下文显示 (如 "294.5K")
+String oled_line1    = "";          // OLED 第1行 (PC端格式化)
+String lcd_line1_str = "";          // LCD 第1行 (PC端格式化)
 
 // 硬件状态
 bool oledOk          = false;       // OLED 是否初始化成功
 bool wifiOk          = false;       // WiFi 是否连接
 bool hasData         = false;       // 是否收到过 JSON 数据
 int  dataVersion     = 0;           // 数据版本号，变化时更新显示
+String lastJson      = "";          // 上次收到的 JSON，相同时跳过
 int  lastDataVersion = -1;          // 上次显示时的版本号
 
 // LED 呼吸效果
@@ -236,12 +235,7 @@ void setup() {
   Serial.println(F(")"));
 
   // === WiFi 连接 ===
-#ifdef WOKWI
-  Serial.println(F("[WOKWI] 模拟模式 - 跳过 WiFi 连接"));
-  wifiOk = true;  // Wokwi 模拟 WiFi 已连接
-#else
   setupWiFi();
-#endif
 
   // === UDP 监听 ===
   udp.begin(UDP_PORT);
@@ -257,6 +251,9 @@ void setup() {
 
 // ===================== loop() =====================
 void loop() {
+  // === Serial 命令处理 ===
+  processSerialCommand();
+
   // === UDP 数据接收 ===
   int packetSize = udp.parsePacket();
   if (packetSize) {
@@ -359,6 +356,10 @@ void setupWiFi() {
 
 // ===================== JSON 解析 =====================
 void parseStatusJson(const char* json) {
+  // 和上次一样就跳过
+  if (lastJson == String(json)) return;
+  lastJson = String(json);
+
   StaticJsonDocument<512> doc;
   DeserializationError error = deserializeJson(doc, json);
 
@@ -389,6 +390,10 @@ void parseStatusJson(const char* json) {
   timestamp    = String(ts);
   const char* cd = doc["ctx_display"] | "";
   ctx_display   = String(cd);
+  const char* ol1 = doc["oled_line1"] | "";
+  oled_line1    = String(ol1);
+  const char* lc1 = doc["lcd_line1"] | "";
+  lcd_line1_str = String(lc1);
   dataVersion++;  // 数据已更新
 
   Serial.print(F("[JSON] status=")); Serial.print(agent_status);
@@ -555,41 +560,38 @@ void updateDisplay() {
     return;
   }
 
-  // OLED: 模型名 (滚动) + 上下文使用率
+  // OLED: 模型名 + 上下文使用率 (64px宽=10字符, 超出截断)
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
 
-  // 模型名 — 超长自动滚动
   display.setCursor(0, 0);
-  int maxW = 10;
-  if (model_name.length() > maxW) {
-    int start = (millis() / 500) % (model_name.length() - maxW + 1);
-    display.println(model_name.substring(start, start + maxW));
-  } else {
-    display.println(model_name);
-  }
+  // 截断过长模型名适配 64px OLED
+  String line1 = oled_line1.length() > 10 ? oled_line1.substring(0, 10) : oled_line1;
+  display.println(line1);
 
   display.setCursor(0, 16);
   display.print(F("Ctx: "));
-  display.println(cum_time);
+  String line2 = cum_time.length() > 8 ? cum_time.substring(0, 8) : cum_time;
+  display.println(line2);
 
   display.display();
 
-  // === LCD 1602 颜文字 ===
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  // Line1: 颜文字
-  if (agent_status == "idle")       lcd.print("(^-^) Zzz");
-  else if (agent_status == "working") lcd.print("(>_<) Busy");
-  else if (agent_status == "waiting") lcd.print("(o_o) Wait");
-  else if (agent_status == "error")   lcd.print("(x_x) Err!");
-  else                                lcd.print("(?_?) ???");
+  // === LCD 1602 颜文字（增量更新 — 内容不变就不刷新，消除闪烁） ===
+  static String lastLcdLine1 = "";
+  static String lastLcdLine2 = "";
+  String newLine2 = ctx_display + "/1M";
 
-  lcd.setCursor(0, 1);
-  // Line2: 上下文使用量
-  lcd.print(ctx_display);
-  lcd.print(F("/1M"));
+  if (lcd_line1_str != lastLcdLine1 || newLine2 != lastLcdLine2) {
+    lastLcdLine1 = lcd_line1_str;
+    lastLcdLine2 = newLine2;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(lcd_line1_str);
+    lcd.setCursor(0, 1);
+    lcd.print(ctx_display);
+    lcd.print(F("/1M"));
+  }
 }
 
 // ===================== 进度条 =====================

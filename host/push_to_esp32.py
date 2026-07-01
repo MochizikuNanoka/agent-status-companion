@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Hermes → ESP32 UDP 推送
-读 agent.log → 解析状态 → UDP 广播到 ESP32
+Hermes → ESP32 UDP 推送 (可配置版)
+读 config.yaml → agent.log → 格式化 → UDP 广播
 """
-import sys, re, os, json, time, socket
+import sys, re, os, json, time, socket, yaml
 from pathlib import Path
 from datetime import datetime, timezone
+
+# 加载配置
+cfg_path = Path(__file__).parent / "config.yaml"
+with open(cfg_path, 'r', encoding='utf-8') as f:
+    cfg = yaml.safe_load(f)
 
 # 找 agent.log
 log_paths = [
@@ -16,24 +21,27 @@ log_file = next((p for p in log_paths if p.exists()), None)
 if not log_file:
     print("找不到 agent.log!"); sys.exit(1)
 
-# UDP 配置
-UDP_IP = "192.168.0.255"  # 广播
-UDP_PORT = 8888
-
+# UDP
+UDP_IP = cfg["udp"]["broadcast"]
+UDP_PORT = cfg["udp"]["port"]
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
+POLL = cfg["monitor"]["poll_interval"]
+TIMEOUT = cfg["monitor"]["working_timeout"]
+MAX_CTX = cfg["monitor"]["max_context"]
+
 print(f"→ 监控 {log_file}")
-print(f"→ UDP 广播 {UDP_IP}:{UDP_PORT}\n")
+print(f"→ UDP {UDP_IP}:{UDP_PORT}")
+print(f"→ 轮询 {POLL}s  超时 {TIMEOUT}s  最大上下文 {MAX_CTX//1000}K")
+print(f"→ 配置 {cfg_path}\n")
 
 MODEL_RE = re.compile(r'model=([\w./-]+)')
 TOTAL_RE = re.compile(r'total=(\d+)')
 
 model = "unknown"
 ctx_len = 0
-last_status = None
-
-
+last_sent = {}
 
 def read_tail(path, n=8):
     try:
@@ -46,7 +54,7 @@ def get_status():
     global model, ctx_len
     lines = read_tail(log_file, 8)
     status = "idle"
-    found_recent_api = False
+    found_api = False
     found_clarify = False
 
     for line in reversed(lines):
@@ -54,72 +62,65 @@ def get_status():
         if m: model = m.group(1)
         t = TOTAL_RE.search(line)
         if t: ctx_len = int(t.group(1))
-        
-        # 最近 5 秒有 API call → working
         if "agent.conversation_loop" in line:
             try:
                 ts_str = line.split(",")[0].strip()
                 ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-                if (datetime.now() - ts).total_seconds() < 8:
-                    found_recent_api = True
+                if (datetime.now() - ts).total_seconds() < TIMEOUT:
+                    found_api = True
             except:
-                found_recent_api = True
-        
-        # clarify 调用 → 标记为等待状态
+                found_api = True
         if "tool clarify" in line or "clarify completed" in line:
             found_clarify = True
-            break  # 最近的操作是 clarify，不再往前看
+            break
 
-    if found_recent_api:
-        status = "working"
-    elif found_clarify:
-        # 最近操作是 clarify → 等待用户回复
-        status = "waiting"
+    if found_api: status = "working"
+    elif found_clarify: status = "waiting"
 
-    # 上下文使用率
-    max_ctx = 1000000  # 1M
-    ctx_pct = min(100, int(ctx_len / max_ctx * 100))
-    ctx_display = f"{ctx_len/1024:.1f}K" if ctx_len >= 1024 else str(ctx_len)
-    cum = f"{ctx_pct}%"
+    ctx_pct = min(100, int(ctx_len / MAX_CTX * 100))
+    ctx_k = f"{ctx_len/1024:.1f}K" if ctx_len >= 1024 else str(ctx_len)
+    kaomoji = cfg["kaomoji"].get(status, cfg["kaomoji"]["unknown"])
+    sshort = cfg["status_short"].get(status, cfg["status_short"]["unknown"])
+
+    # 格式化各行
+    fmt_vars = {
+        "model": model, "status": status, "status_short": sshort,
+        "ctx_pct": f"{ctx_pct}%", "ctx_k": ctx_k, "kaomoji": kaomoji,
+    }
 
     return {
         "status": status,
         "agent": "hermes",
         "model": model,
-        "task_summary": "",
         "context_len": ctx_len,
-        "cum_time": cum,
-        "ctx_display": ctx_display,
-        "cpu_percent": 0,
-        "mem_mb": 0,
+        "cum_time": fmt(cfg["display"]["oled_line2"], fmt_vars)[:16],
+        "task_summary": "",
+        "cpu_percent": 0, "mem_mb": 0,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "ctx_display": fmt(cfg["display"]["lcd_line2"], fmt_vars)[:16],
+        "oled_line1": fmt(cfg["display"]["oled_line1"], fmt_vars)[:10],
+        "lcd_line1": fmt(cfg["display"]["lcd_line1"], fmt_vars)[:16],
     }
 
-debounce_status = None
-debounce_time = 0
+def fmt(template, vars):
+    result = template
+    for k, v in vars.items():
+        result = result.replace("{" + k + "}", str(v))
+    return result
 
 try:
     while True:
         data = get_status()
         current = data["status"]
-        now = time.time()
-        
-        # 防抖: A→B→A 在 0.5 秒内 → 忽略中间的 B
-        if current != last_status:
-            if debounce_status and debounce_status != current and now - debounce_time < 0.5:
-                # 快速来回切换，忽略
-                pass
-            else:
-                if debounce_status != current:
-                    debounce_status = current
-                    debounce_time = now
-                icon = {"idle":"😴","working":"🔥","waiting":"⏳","error":"💥"}.get(current,"❓")
-                print(f"{icon} [{current.upper()}] model={model} ctx={ctx_len//1024}K {data['cum_time']}")
-                last_status = current
+        # 只在状态变化时打印
+        key = f"{current}|{data['ctx_display']}"
+        if key != last_sent.get("key"):
+            print(f"[{current.upper()}] {data['lcd_line1']} | {data['ctx_display']} | {data['cum_time']}")
+            last_sent["key"] = key
 
         msg = json.dumps(data, ensure_ascii=False)
         sock.sendto(msg.encode("utf-8"), (UDP_IP, UDP_PORT))
-        time.sleep(1)
+        time.sleep(POLL)
 
 except KeyboardInterrupt:
     print("\n已停止")
