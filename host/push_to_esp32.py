@@ -98,7 +98,7 @@ def get_status():
         "cpu_percent": 0, "mem_mb": 0,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "ctx_display": fmt(cfg["display"]["lcd_line2"], fmt_vars)[:16],
-        "oled_line1": fmt(cfg["display"]["oled_line1"], fmt_vars)[:10],
+        "oled_line1": fmt(cfg["display"]["oled_line1"], fmt_vars),
         "lcd_line1": fmt(cfg["display"]["lcd_line1"], fmt_vars)[:16],
     }
 
