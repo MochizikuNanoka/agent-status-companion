@@ -150,12 +150,12 @@ def determine_status(now):
     """基于最近一次 API 调用时间判定状态，带 0.5s 防抖"""
     global last_status, last_api_time, last_was_clarify
 
-    if last_api_time is None:
+    if last_was_clarify:
+        raw = "waiting"  # clarify 完成立即切 waiting，不等超时
+    elif last_api_time is None:
         raw = "idle"
     elif (now - last_api_time).total_seconds() < TIMEOUT:
         raw = "working"
-    elif last_was_clarify:
-        raw = "waiting"
     else:
         raw = "idle"
 
