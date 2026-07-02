@@ -75,6 +75,15 @@ def _fmt_ctx(kb):
         return f"{kb/1000:.0f}k"
     return f"{kb/1:.0f}"
 
+def _elapsed_since(started_at: str) -> float:
+    """从 started_at ISO 字符串实时计算经过秒数（不依赖缓存值）。"""
+    try:
+        t = time.mktime(time.strptime(started_at[:19], "%Y-%m-%dT%H:%M:%S"))
+        return time.time() - t
+    except Exception:
+        return 0
+
+
 def build_esp32_display(st):
     """Convert plugin state JSON → ESP32 display JSON.
 
@@ -84,7 +93,8 @@ def build_esp32_display(st):
     status = st.get("status", "idle")
     model = st.get("model", "?")
     tool = st.get("tool_name", "") or ""
-    dur = fmt_dur(st.get("session_duration_s", 0))
+    # 实时计算时长，不依赖插件缓存的 session_duration_s（空闲时不再更新）
+    dur = fmt_dur(_elapsed_since(st.get("started_at", "")))
 
     # Kaomoji + status label
     short = {"thinking": "Think", "working": "Busy", "waiting": "Wait", "idle": "Zzzz"}
