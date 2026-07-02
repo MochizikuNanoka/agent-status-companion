@@ -130,7 +130,7 @@ def build_esp32_display(st):
 
     # OLED (64×32, 4 lines of 10 chars) — 固件支持滚动，发全长
     oled_line1 = model                              # 不截断，固件会自动滚动
-    oled_line2 = f"{kaomoji} {_fmt_ctx(tokens)}"    # 颜文字 + token 用量
+    oled_line2 = _fmt_ctx(tokens)                     # token 用量
 
     # LCD 1602 (16×2)
     lcd_line1 = f"{kaomoji} {label:<10}"             # "(>_<) Busy     "
