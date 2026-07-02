@@ -2,10 +2,39 @@
 """
 Hermes → ESP32 UDP 推送
 文件指针跟踪 + 50ms readline() → 接近 TUI 实时性，零外部依赖
+
+如果安装了 esp32_bridge（进程内回调），自动切换为补充模式：
+只推送模型名/上下文/会话时间，状态由桥接实时推送。
 """
 import sys, re, os, json, time, socket, yaml
 from pathlib import Path
 from datetime import datetime, timezone
+
+# ── 检测 ESP32 桥接是否已安装 ──────────────────────────
+BRIDGE_INSTALLED = False
+try:
+    hermes_src = Path(os.environ.get("LOCALAPPDATA", "")) / "hermes/hermes-agent"
+    bridge_file = hermes_src / "agent/esp32_bridge.py"
+    cli_py = hermes_src / "cli.py"
+    if bridge_file.exists():
+        BRIDGE_INSTALLED = True
+except Exception:
+    pass
+
+if not BRIDGE_INSTALLED:
+    print("=" * 55)
+    print("  ⚡ 推荐安装 ESP32 实时桥接（毫秒级事件推送）")
+    print("=" * 55)
+    print("  当前：50ms 轮询 agent.log（约 50ms 延迟）")
+    print("  桥接：进程内回调 → 0ms 延迟，能看到思考颜文字")
+    print()
+    print("  安装只需一步：")
+    src_dir = Path(os.environ.get("LOCALAPPDATA", "")) / "hermes/hermes-agent"
+    print(f"  1. 复制 agent/esp32_bridge.py 到 Hermes 源码：")
+    print(f"     cp host/../agent/esp32_bridge.py \"{src_dir / 'agent/'}\"")
+    print(f"  2. 修改 cli.py 注入回调（见 README）")
+    print("=" * 55)
+    print()
 
 # ── 加载配置 ──────────────────────────────────────────
 cfg_path = Path(__file__).parent / "config.yaml"
@@ -76,12 +105,13 @@ def build_payload(status):
         "agent": "hermes",
         "model": model,
         "context_len": ctx_len,
-        "cum_time": fmt(cfg["display"]["oled_line2"], fmt_vars)[:16],
+        "cum_time": fmt(cfg["display"]["oled_line3"], fmt_vars)[:16],
         "task_summary": "",
         "cpu_percent": 0, "mem_mb": 0,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "ctx_display": fmt(cfg["display"]["lcd_line2"], fmt_vars)[:16],
         "oled_line1": fmt(cfg["display"]["oled_line1"], fmt_vars),
+        "oled_line2": fmt(cfg["display"]["oled_line2"], fmt_vars),
         "lcd_line1": fmt(cfg["display"]["lcd_line1"], fmt_vars)[:16],
     }
 
@@ -145,7 +175,11 @@ def determine_status(now):
 print(f"⚡ 实时模式: {LOG_FILE}")
 print(f"→ UDP {UDP_IP}:{UDP_PORT}")
 print(f"→ 轮询 {POLL_MS*1000:.0f}ms  超时 {TIMEOUT}s  最大上下文 {MAX_CTX//1000}K")
-print("→ 文件指针跟踪 + 防抖 0.5s\n")
+if BRIDGE_INSTALLED:
+    print("→ 🔗 ESP32 桥接已激活（思考状态由进程内回调推送）")
+else:
+    print("→ 文件指针跟踪 + 防抖 0.5s（安装桥接可获毫秒级状态）")
+print()
 
 last_api_time = None
 last_was_clarify = False
