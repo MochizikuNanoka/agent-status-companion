@@ -173,6 +173,7 @@ def watch(*, once=False, json_mode=False, udp_mode=False, esp32_ip=None):
 
     last_status = None
     last_iter = -1
+    last_heartbeat = 0  # 心跳计时：每 2 秒重发一次保持时间同步
     if not json_mode and not udp_mode:
         print(f"{C['dim']}Watching {state_file()}... Ctrl+C to exit{C['reset']}")
 
@@ -184,14 +185,22 @@ def watch(*, once=False, json_mode=False, udp_mode=False, esp32_ip=None):
 
         cur_status = st.get("status", "idle")
         cur_iter = st.get("iteration", 0)
+        now_tick = time.time()
 
-        if cur_status != last_status or cur_iter != last_iter:
+        # 状态变化 或 超过 2 秒心跳 → 发送
+        changed = (cur_status != last_status or cur_iter != last_iter)
+        heartbeat = udp_mode and (now_tick - last_heartbeat >= 2)
+
+        if changed or heartbeat:
             if udp_mode:
                 esp32_data = build_esp32_display(st)
                 udp_send(esp32_data, host=esp32_ip)
-                icon = ICON.get(cur_status, "?")
                 target = esp32_ip or "broadcast"
-                print(f"  UDP → {icon} {cur_status.upper():<8} {esp32_data['oled_line1']}  ({target})")
+                tag = "" if changed else " ♡"  # 心跳标记
+                if changed:
+                    icon = ICON.get(cur_status, "?")
+                    print(f"  UDP → {icon} {cur_status.upper():<8} {esp32_data['oled_line1']}  ({target}){tag}")
+                last_heartbeat = now_tick
             elif json_mode:
                 display_json(st)
             else:
