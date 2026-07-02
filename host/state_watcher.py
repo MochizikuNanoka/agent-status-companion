@@ -119,8 +119,9 @@ def build_esp32_display(st):
     # 实时计算时长，不依赖插件缓存的 session_duration_s（空闲时不再更新）
     dur = fmt_dur(_elapsed_since(st.get("started_at", "")))
 
-    # 上下文用量百分比（deepseek-v4-pro 上下文窗口 1M tokens）
-    pct = min(99, int(tokens / 10000))  # tokens/1M * 100
+    # 上下文 token 数 + 用量百分比（deepseek-v4-pro 窗口 1M）
+    tokens = _read_token_count()
+    pct = max(1, min(99, int(tokens / 10000)))  # tokens/1M * 100
 
     # Kaomoji + status label
     short = {"thinking": "Think", "working": "Busy", "waiting": "Wait", "idle": "Zzzz"}
@@ -129,7 +130,6 @@ def build_esp32_display(st):
 
     # OLED (64×32, 4 lines of 10 chars) — 固件支持滚动，发全长
     oled_line1 = model                              # 不截断，固件会自动滚动
-    tokens = _read_token_count()
     oled_line2 = f"{kaomoji} {_fmt_ctx(tokens)}"    # 颜文字 + token 用量
 
     # LCD 1602 (16×2)
