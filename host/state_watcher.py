@@ -69,11 +69,34 @@ def display_json(st):
 
 # ── ESP32 display format ───────────────────────────────────────────────
 
-def _fmt_ctx(kb):
-    """Format context length for compact display."""
-    if kb >= 1000:
-        return f"{kb/1000:.0f}k"
-    return f"{kb/1:.0f}"
+def _fmt_ctx(token_count):
+    """Format token count for compact OLED display."""
+    if token_count >= 1000:
+        return f"{token_count/1000:.0f}K"
+    return str(token_count)
+
+# ── agent.log parsing ──────────────────────────────────────────────────
+
+def _read_token_count():
+    """Read the latest total token count from agent.log."""
+    try:
+        import re
+        log = Path(os.environ.get("LOCALAPPDATA", "")) / "hermes" / "logs" / "agent.log"
+        if not log.exists():
+            return 0
+        # Scan last few KB for the latest API call
+        size = log.stat().st_size
+        with open(log, "r", encoding="utf-8", errors="replace") as f:
+            f.seek(max(0, size - 8192))
+            total = 0
+            for line in f:
+                if "API call #" in line:
+                    m = re.search(r"total=(\d+)", line)
+                    if m:
+                        total = int(m.group(1))
+            return total
+    except Exception:
+        return 0
 
 def _elapsed_since(started_at: str) -> float:
     """从 started_at ISO 字符串实时计算经过秒数（不依赖缓存值）。"""
@@ -103,7 +126,8 @@ def build_esp32_display(st):
 
     # OLED (64×32, 4 lines of 10 chars) — 固件支持滚动，发全长
     oled_line1 = model                              # 不截断，固件会自动滚动
-    oled_line2 = f"{kaomoji} {label}"                # kaomoji + status
+    tokens = _read_token_count()
+    oled_line2 = f"{kaomoji} {_fmt_ctx(tokens)}"    # 颜文字 + token 用量
 
     # LCD 1602 (16×2)
     lcd_line1 = f"{kaomoji} {label:<10}"             # "(>_<) Busy     "
