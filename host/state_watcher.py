@@ -159,7 +159,7 @@ def udp_send(data, host=None, port=8888):
 
 # ── Main ───────────────────────────────────────────────────────────────
 
-def watch(*, once=False, json_mode=False, udp_mode=False):
+def watch(*, once=False, json_mode=False, udp_mode=False, esp32_ip=None):
     if once:
         st = read_state()
         if st is None:
@@ -188,10 +188,10 @@ def watch(*, once=False, json_mode=False, udp_mode=False):
         if cur_status != last_status or cur_iter != last_iter:
             if udp_mode:
                 esp32_data = build_esp32_display(st)
-                udp_send(esp32_data)
-                # Also print locally so user sees what's being sent
+                udp_send(esp32_data, host=esp32_ip)
                 icon = ICON.get(cur_status, "?")
-                print(f"  UDP → {icon} {cur_status.upper():<8} {esp32_data['oled_line1']}")
+                target = esp32_ip or "broadcast"
+                print(f"  UDP → {icon} {cur_status.upper():<8} {esp32_data['oled_line1']}  ({target})")
             elif json_mode:
                 display_json(st)
             else:
@@ -203,8 +203,14 @@ def watch(*, once=False, json_mode=False, udp_mode=False):
 
 
 if __name__ == "__main__":
+    esp32_ip = None
+    if "--esp32-ip" in sys.argv:
+        idx = sys.argv.index("--esp32-ip")
+        if idx + 1 < len(sys.argv):
+            esp32_ip = sys.argv[idx + 1]
     watch(
         once="--once" in sys.argv,
         json_mode="--json" in sys.argv,
         udp_mode="--udp" in sys.argv,
+        esp32_ip=esp32_ip,
     )
