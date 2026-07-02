@@ -105,12 +105,13 @@ string BuildPayload(string status)
         ["agent"] = "hermes",
         ["model"] = model,
         ["context_len"] = ctxLen,
-        ["cum_time"] = Fmt(cfg.Display.OledLine2, vars)[..Math.Min(16, Fmt(cfg.Display.OledLine2, vars).Length)],
+        ["cum_time"] = Fmt(cfg.Display.OledLine3, vars)[..Math.Min(16, Fmt(cfg.Display.OledLine3, vars).Length)],
         ["task_summary"] = "",
         ["cpu_percent"] = 0, ["mem_mb"] = 0,
         ["timestamp"] = DateTime.UtcNow.ToString("O"),
         ["ctx_display"] = Fmt(cfg.Display.LcdLine2, vars)[..Math.Min(16, Fmt(cfg.Display.LcdLine2, vars).Length)],
         ["oled_line1"] = Fmt(cfg.Display.OledLine1, vars),
+        ["oled_line2"] = Fmt(cfg.Display.OledLine2, vars),
         ["lcd_line1"] = Fmt(cfg.Display.LcdLine1, vars)[..Math.Min(16, Fmt(cfg.Display.LcdLine1, vars).Length)],
     };
     return JsonSerializer.Serialize(obj);
@@ -180,10 +181,18 @@ string DetermineStatus(DateTime now, DateTime? lastApiTime, bool lastWasClarify)
 }
 
 // ── 主循环 ────────────────────────────────────────────
+// 检测 ESP32 桥接
+var bridgeFile = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+    "hermes", "hermes-agent", "agent", "esp32_bridge.py");
+var bridgeInstalled = File.Exists(bridgeFile);
+
 Console.WriteLine($"⚡ 实时模式: {logFile}");
 Console.WriteLine($"→ UDP {cfg.Udp.Broadcast}:{cfg.Udp.Port}");
 Console.WriteLine($"→ 轮询 {pollMs}ms  超时 {timeout}s  最大上下文 {maxCtx / 1000}K");
-Console.WriteLine("→ 文件指针跟踪 + 防抖 0.5s");
+Console.WriteLine(bridgeInstalled
+    ? "→ 🔗 ESP32 桥接已激活（思考状态由进程内回调推送）"
+    : "→ 文件指针跟踪 + 防抖 0.5s（安装桥接可获毫秒级状态）");
 Console.WriteLine();
 
 DateTime? lastApiTime = null;
@@ -249,4 +258,4 @@ class Config
 }
 class UdpConfig { public string Broadcast { get; set; } = ""; public int Port { get; set; } }
 class MonitorConfig { public int PollInterval { get; set; } public int WorkingTimeout { get; set; } public int MaxContext { get; set; } }
-class DisplayConfig { public string OledLine1 { get; set; } = ""; public string OledLine2 { get; set; } = ""; public string LcdLine1 { get; set; } = ""; public string LcdLine2 { get; set; } = ""; }
+class DisplayConfig { public string OledLine1 { get; set; } = ""; public string OledLine2 { get; set; } = ""; public string OledLine3 { get; set; } = ""; public string LcdLine1 { get; set; } = ""; public string LcdLine2 { get; set; } = ""; }
