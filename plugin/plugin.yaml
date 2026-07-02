@@ -1,5 +1,12 @@
-name: esp32-status
-version: 1.0.0
-description: "Clarify 工具完成时通过 UDP 推送 waiting 状态到 ESP32"
+name: esp32-companion
+version: "2.0.0"
+description: "ESP32 Agent Status Companion — tracks Hermes lifecycle (thinking/working/waiting/idle) via plugin hooks and writes a real-time state JSON file. The companion backend reads this file for ESP32 display, desktop dashboard, or any other consumer."
+author: MirrorHua
+kind: standalone
 hooks:
+  - pre_llm_call
+  - post_llm_call
+  - pre_tool_call
   - post_tool_call
+  - on_session_start
+  - on_session_end

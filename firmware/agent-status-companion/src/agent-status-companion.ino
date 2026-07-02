@@ -130,6 +130,7 @@ float  mem_mb        = 0.0;
 String timestamp     = "";
 String ctx_display   = "";          // 上下文显示 (如 "294.5K")
 String oled_line1    = "";          // OLED 第1行 (PC端格式化)
+String oled_line2    = "";          // OLED 第2行 (颜文字)
 String lcd_line1_str = "";          // LCD 第1行 (PC端格式化)
 
 // 硬件状态
@@ -394,6 +395,8 @@ void parseStatusJson(const char* json) {
   oled_line1    = String(ol1);
   const char* lc1 = doc["lcd_line1"] | "";
   lcd_line1_str = String(lc1);
+  const char* ol2 = doc["oled_line2"] | "";
+  oled_line2    = String(ol2);
   dataVersion++;  // 数据已更新
 
   Serial.print(F("[JSON] status=")); Serial.print(agent_status);
@@ -583,6 +586,10 @@ void updateDisplay() {
     display.setCursor(0, 0);
     display.println(oled_line1);
   }
+
+  // 颜文字 (来自 config.yaml)
+  display.setCursor(0, 8);
+  display.println(oled_line2);
 
   // cum_time 已含 "Ctx: " 前缀 (来自 config.yaml)
   display.setCursor(0, 16);

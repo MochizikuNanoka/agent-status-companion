@@ -1,109 +1,100 @@
-# Agent Status Companion
+# Agent Status Companion v2
 
-ESP32 桌面硬件伴侣 — 实时显示 Hermes Agent 运行状态（OLED + LCD 双屏）。
+ESP32 桌面伴侣 — 实时显示 Hermes Agent 运行状态（思考/工作/等待/空闲）。
 
-## 效果
-
-```
-OLED (64×32)          LCD 1602 (16×2)
-┌──────────┐          ┌──────────────────┐
-│deepseek-v4│          │(◔_◔) Busy        │
-│Ctx: 29%   │          │294.5K/1M         │
-└──────────┘          └──────────────────┘
-```
-
-状态自动切换：idle → working → waiting，颜文字和颜色跟 Hermes TUI 同步。
-
-## 工作原理
+## v2 架构
 
 ```
-Hermes CLI 运行中 → agent.log → push_to_esp32.py → UDP广播 → ESP32 → OLED + LCD
-                                ↑ 50ms 文件指针跟踪          ↑ 192.168.0.255:8888
-```
+Hermes 内部                         外部消费者
+───────────                        ──────────
+esp32-companion 插件                 state_watcher.py
+  ├─ pre_llm_call  ─→ thinking ─┐     ├─ 终端可视化
+  ├─ pre_tool_call ─→ working   ─┤     ├─ JSON 行输出
+  ├─ pre_tool_call ─→ waiting ──→ JSON ─→ state_watcher.py
+  ├─ post_llm_call ─→ idle      ─┤     └─ UDP 广播 → ESP32
+  ├─ on_session_start           ─┘
+  └─ on_session_end
 
-## 快速开始
-
-### 1. 烧录固件（首次）
-
-```bash
-export PATH="$PATH:$HOME/.platformio/penv/Scripts"
-cd firmware/agent-status-companion
-pio run -t upload -e esp32dev
-```
-
-### 2. 启动推送
-
-```bash
-cd host
-python push_to_esp32.py
-```
-
-终端会打印实时状态，ESP32 的 OLED 和 LCD 同步显示。
-
-### 3. 自定义显示
-
-编辑 `host/config.yaml`，改颜文字、显示格式、状态简称，无需重烧固件：
-
-```yaml
-kaomoji:
-  idle: "(^_^)"
-  working: "(◔_◔)"
-  waiting: "(◕‿◕✿)"
-
-display:
-  oled_line1: "{model}"
-  oled_line2: "Ctx: {ctx_pct}"
-  lcd_line1: "{kaomoji} {status_short}"
-  lcd_line2: "{ctx_k}/1M"
-```
-
-## 硬件
-
-| 组件 | 规格 | 引脚 |
-|------|------|------|
-| ESP32 | DevKit CH340 | COM3 |
-| OLED | SSD1306 64×32 I2C 0x3C | SDA=21, SCL=22 |
-| LCD | 1602A 16×2 并行 4-bit | RS=12, EN=14, D4=26, D5=25, D6=33, D7=32 |
-| LED | WS2812B | GPIO4 (暂禁用) |
-
-## JSON 协议
-
-```json
-{
-  "status": "working",
-  "agent": "hermes",
-  "model": "deepseek-v4-pro",
-  "context_len": 294898,
-  "cum_time": "5h30m",
-  "timestamp": "2026-07-02T...",
-  "oled_line1": "deepseek-v4-pro",
-  "lcd_line1": "(◔_◔) Busy",
-  "ctx_display": "294.5K/1M"
-}
+对比 v1（废弃）：
+  ✗ v1: 解析 agent.log → 猜测状态 → monkey-patch cli.py
+  ✓ v2: plugin hooks → 精确状态 → 零侵入 Hermes 源码
 ```
 
 ## 项目结构
 
 ```
-agent-status-companion/
-├── firmware/agent-status-companion/
-│   ├── src/agent-status-companion.ino   # ESP32 固件
-│   └── platformio.ini                   # PlatformIO 配置
+├── plugin/                  # Hermes 插件（放到 ~/.hermes/plugins/esp32-companion/）
+│   ├── plugin.yaml
+│   └── __init__.py
 ├── host/
-│   ├── push_to_esp32.py                 # 主推送脚本（唯一入口）
-│   └── config.yaml                      # 显示配置（改颜文字/格式）
-├── simulation/
-│   └── wokwi/                           # Wokwi 模拟器
-├── hardware/
-│   ├── schematics/wiring.md             # 接线图
-│   └── enclosure/                       # 3D 外壳 (OpenSCAD)
-└── docs/
+│   └── state_watcher.py     # 后端：监控状态 + 终端面板 + UDP 广播
+├── firmware/                # ESP32 固件（PlatformIO + Arduino）
+│   └── agent-status-companion/
+│       ├── platformio.ini
+│       └── src/agent-status-companion.ino
+├── hardware/                # 3D 外壳 + 接线图
+│   ├── enclosure/case.stl
+│   └── schematics/wiring.md
+├── simulation/              # ESP32 模拟器 + Wokwi
+└── docs/                    # 部署文档
 ```
+
+## 快速开始
+
+### 1. 安装插件
+
+```bash
+# 复制插件到 Hermes 用户插件目录
+cp -r plugin/ "$HERMES_HOME/plugins/esp32-companion/"
+
+# 启用
+hermes plugins enable esp32-companion
+
+# 重启 Hermes 生效
+hermes
+```
+
+### 2. 运行后端
+
+```bash
+# 终端可视化（持续刷新）
+python host/state_watcher.py
+
+# JSON 模式（管道给其他程序）
+python host/state_watcher.py --json
+
+# UDP 广播模式（推送到 ESP32）
+python host/state_watcher.py --udp
+```
+
+### 3. 烧录 ESP32 固件（可选）
+
+```bash
+cd firmware/agent-status-companion
+pio run -e esp32dev -t upload
+```
+
+## 四种状态
+
+| 状态 | 触发条件 | 颜文字 |
+|------|----------|--------|
+| **thinking** | LLM 开始思考 | `(..*)` |
+| **working** | 工具执行中 | `(>_<)` |
+| **waiting** | clarify 等用户回复 | `(o_o)?` |
+| **idle** | 空闲等待 | `(^-^)` |
+
+## 硬件
+
+| 元件 | 型号 | 引脚 |
+|------|------|------|
+| ESP32 | DevKit (CH340) | COM3 |
+| OLED | SSD1306 64×32 I2C | SDA=21, SCL=22, 0x3C |
+| LCD | 1602A 16×2 | RS=12, EN=14, D4-7=26-32 |
+| WiFi | king / kissking | UDP 255.255.255.255:8888 |
 
 ## 技术要点
 
-- **50ms 实时跟踪**：文件指针 `readline()` + 读增量，不用轮询
-- **0.5s 状态防抖**：消除 working↔idle 快速切换导致的 OLED 闪烁
-- **会话时间持久化**：`.session_start.txt` 防重启丢失
-- **哑终端架构**：固件只渲染，格式在 `config.yaml` 定义
-- **UDP 广播**：无需知道 ESP32 IP，无需 broker，比串口/MQTT 可靠
+- **状态捕获**：事件驱动（非轮询），毫秒级延迟
+- **后端刷新**：300ms 轮询，仅状态变化时输出
+- **零侵入**：不修改 Hermes 源码，纯插件实现
+- **跨平台**：Windows / macOS / Linux
