@@ -91,8 +91,8 @@ def build_esp32_display(st):
     kaomoji = ICON.get(status, "(._.)")
     label = short.get(status, status)
 
-    # OLED (64×32, 4 lines of 10 chars)
-    oled_line1 = model[:10]                          # model name
+    # OLED (64×32, 4 lines of 10 chars) — 固件支持滚动，发全长
+    oled_line1 = model                              # 不截断，固件会自动滚动
     oled_line2 = f"{kaomoji} {label}"                # kaomoji + status
 
     # LCD 1602 (16×2)
@@ -199,7 +199,7 @@ def watch(*, once=False, json_mode=False, udp_mode=False, esp32_ip=None):
             last_status = cur_status
             last_iter = cur_iter
 
-        time.sleep(0.3)
+        time.sleep(0.1)
 
 
 if __name__ == "__main__":
