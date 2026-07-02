@@ -83,7 +83,7 @@
 #define LCD_D7  32
 
 // ===================== WiFi 配置 =====================
-// TODO: 在此处填写你的 WiFi 凭据
+// TODO: 在此处填写你的 WiFi 凭据（请勿提交真实密码！）
 #define WIFI_SSID        "YOUR_SSID"
 #define WIFI_PASS        "YOUR_PASSWORD"
 #define WIFI_TIMEOUT_MS  15000    // WiFi 连接超时 (毫秒)
