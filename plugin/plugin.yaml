@@ -1,0 +1,5 @@
+name: esp32-status
+version: 1.0.0
+description: "Clarify 工具完成时通过 UDP 推送 waiting 状态到 ESP32"
+hooks:
+  - post_tool_call
