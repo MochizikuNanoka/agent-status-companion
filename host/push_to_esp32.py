@@ -204,7 +204,14 @@ with open(LOG_FILE, 'r', encoding='utf-8', errors='replace') as f:
 
             # 每次循环都判定状态并推送（50ms 间隔）
             now = datetime.now()
-            status = determine_status(now)
+            if BRIDGE_INSTALLED:
+                # 桥接负责 working/idle，push 脚本只负责 waiting + 格式化
+                raw = determine_status(now)
+                if raw == "idle":
+                    continue  # 让桥接处理，不覆盖
+                status = raw
+            else:
+                status = determine_status(now)
 
             # 只在状态或内容变化时打印 + 推送
             data = build_payload(status)

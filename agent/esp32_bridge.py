@@ -1,10 +1,9 @@
 """
 Hermes → ESP32 实时桥接 (进程内回调 → UDP 广播)
 =================================================
-挂载到 AIAgent 的 callback 上，在 TUI 更新状态的同时推送：
-- thinking_callback → working/idle + 颜文字
-- clarify_callback → waiting
-同时直接读取 agent.model / agent.session_total_tokens（准确，不依赖日志）
+挂在 thinking_callback 上，在 TUI 更新颜文字的同时推送 working/idle。
+模型名和上下文直接从 agent 对象读取（准确，不依赖日志）。
+waiting 状态和格式化显示由 push_to_esp32.py 补充。
 """
 import socket, json, time
 from datetime import datetime, timezone
@@ -13,7 +12,7 @@ UDP_IP = "192.168.0.255"
 UDP_PORT = 8888
 
 _sock = None
-_agent = None  # AIAgent 实例引用
+_agent = None
 _state = {"status": "idle", "last_sent": 0, "last_key": ""}
 
 
@@ -26,7 +25,6 @@ def _get_sock():
 
 
 def set_agent(agent):
-    """cli.py 在创建 AIAgent 后调用，让桥接能读内部状态"""
     global _agent
     _agent = agent
 
@@ -45,21 +43,14 @@ def _send(data):
         pass
 
 
-def _read_agent():
-    """从 agent 对象读取模型名和上下文（准确，不依赖日志）"""
-    if _agent is None:
-        return "unknown", 0
-    model = getattr(_agent, "model", "unknown") or "unknown"
-    tokens = getattr(_agent, "session_total_tokens", 0)
-    return model, tokens
-
-
 def wrap_thinking(original_callback):
     def wrapper(text: str):
         if original_callback:
             original_callback(text)
 
-        model, ctx = _read_agent()
+        model = getattr(_agent, "model", "unknown") or "unknown" if _agent else "unknown"
+        ctx = getattr(_agent, "session_total_tokens", 0) if _agent else 0
+
         if text and text.strip():
             kaomoji = text.split(" ")[0] if " " in text else text[:6]
             _send({"status": "working", "kaomoji": kaomoji,
@@ -70,12 +61,4 @@ def wrap_thinking(original_callback):
                    "model": model, "context_len": ctx,
                    "timestamp": datetime.now(timezone.utc).isoformat()})
 
-
-def wrap_clarify(original_callback):
-    def wrapper(*args, **kwargs):
-        if original_callback:
-            original_callback(*args, **kwargs)
-        model, ctx = _read_agent()
-        _send({"status": "waiting",
-               "model": model, "context_len": ctx,
-               "timestamp": datetime.now(timezone.utc).isoformat()})
+    return wrapper
