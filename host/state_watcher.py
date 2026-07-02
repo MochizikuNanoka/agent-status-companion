@@ -121,12 +121,38 @@ def build_esp32_display(st):
 
 # ── UDP broadcast ──────────────────────────────────────────────────────
 
-def udp_send(data, host="255.255.255.255", port=8888):
+def _broadcast_addrs():
+    """Return broadcast addresses to try: subnet-specific + global fallback."""
+    addrs = []
+    try:
+        # Get local IP to derive subnet broadcast
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        # Convert to subnet broadcast (assume /24 = 255.255.255.0)
+        parts = local_ip.split(".")
+        parts[3] = "255"
+        addrs.append(".".join(parts))  # e.g. 192.168.0.255
+    except Exception:
+        pass
+    addrs.append("255.255.255.255")  # global broadcast fallback
+    return addrs
+
+
+def udp_send(data, host=None, port=8888):
+    """Send data via UDP to broadcast addresses. host overrides auto-detect."""
+    targets = [host] if host else _broadcast_addrs()
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.settimeout(0.1)
-        sock.sendto(json.dumps(data, ensure_ascii=False).encode(), (host, port))
+        payload = json.dumps(data, ensure_ascii=False).encode()
+        for addr in targets:
+            try:
+                sock.sendto(payload, (addr, port))
+            except Exception:
+                pass
         sock.close()
     except Exception:
         pass
