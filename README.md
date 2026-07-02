@@ -90,7 +90,6 @@ pio run -e esp32dev -t upload
 | ESP32 | DevKit (CH340) | COM3 |
 | OLED | SSD1306 64×32 I2C | SDA=21, SCL=22, 0x3C |
 | LCD | 1602A 16×2 | RS=12, EN=14, D4-7=26-32 |
-| WiFi | king / kissking | UDP 255.255.255.255:8888 |
 
 ## 技术要点
 

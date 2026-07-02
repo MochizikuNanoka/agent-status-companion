@@ -119,6 +119,9 @@ def build_esp32_display(st):
     # 实时计算时长，不依赖插件缓存的 session_duration_s（空闲时不再更新）
     dur = fmt_dur(_elapsed_since(st.get("started_at", "")))
 
+    # 上下文用量百分比（deepseek-v4-pro 上下文窗口 1M tokens）
+    pct = min(99, int(tokens / 10000))  # tokens/1M * 100
+
     # Kaomoji + status label
     short = {"thinking": "Think", "working": "Busy", "waiting": "Wait", "idle": "Zzzz"}
     kaomoji = ICON.get(status, "(._.)")
@@ -142,7 +145,7 @@ def build_esp32_display(st):
         "model":       model,
         "task_summary": tool,
         "context_len":  st.get("context_len", 0),
-        "cum_time":    dur,
+        "cum_time":    f"ctx {pct}%",           # OLED L3: 上下文百分比
         "cpu_percent":  0,
         "mem_mb":       0,
         "timestamp":   st.get("updated_at", ""),
